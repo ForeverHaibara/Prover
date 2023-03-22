@@ -1,16 +1,105 @@
 from typing import Optional, List
+from functools import lru_cache
+import re
 
 import sympy as sp
 
+from ...basic.types import is_rational_quadratic_roots
 from ..proof import Proof
+
+
+@lru_cache
+def _get_transform(tp: str, n: int):
+    """
+    tp: one of 'u' or 'v' or 'w' or 'z', standing for sin, cos, tan and cot
+    n : the degree
+    For instance, 
+    """
+    t = sp.symbols('t')
+    if n == 1:
+        if tp == 'u':
+            return (2*t)/(1+t*t)
+        elif tp == 'v':
+            return (1-t*t)/(1+t*t)
+        elif tp == 'w':
+            return (2*t)/(1-t*t)
+        elif tp == 'z':
+            return (1-t*t)/(2*t)
+    
+    if tp == 'z':
+        return 1 / _get_transform('w', n)
+
+    if n % 2 == 0:
+        if tp == 'u':
+            v = 2 * _get_transform('u', n // 2) * _get_transform('v', n // 2)
+        elif tp == 'v':
+            v = 2 * _get_transform('v', n // 2)**2 - 1
+        elif tp == 'w':
+            tmp = _get_transform('w', n // 2)
+            v = 2 * tmp / (1 - tmp) / (1 + tmp)
+    else:
+        if tp == 'u':
+            v =  _get_transform('u', n - 1) * (1-t*t)/(1+t*t) 
+            v += _get_transform('v', n - 1) * (2*t)/(1+t*t)
+        elif tp == 'v':
+            v =  _get_transform('v', n - 1) * (1-t*t)/(1+t*t) 
+            v -= _get_transform('u', n - 1) * (2*t)/(1+t*t)
+        elif tp == 'w':
+            tmp =  _get_transform('w', n - 1)
+            v = (tmp*(1 - t*t) + 2*t) / (1 - t*t - tmp * 2*t)
+    
+    return v.factor()
+
+
+def _convert_string_fill_cdot(f):
+    for head in ('sin', 'cos', 'tan', 'cot'):
+        f = f.replace('%s(x)'%head, '%s(1*x)'%head)
+        f = re.sub('%s\((\d+)x\)'%head, lambda x: '%s(%s*x)'%(head, x.group(1)), f)
+
+    return f
+
+
+def _convert_string_to_poly(f, safe_degree = 10):
+    f = _convert_string_fill_cdot(f)
+    
+    f = re.sub('sin\((\d+)\*x\)', lambda x: 'u%s'%x.group(1), f)
+    f = re.sub('cos\((\d+)\*x\)', lambda x: 'v%s'%x.group(1), f)
+    f = re.sub('tan\((\d+)\*x\)', lambda x: 'w%s'%x.group(1), f)
+    f = re.sub('cot\((\d+)\*x\)', lambda x: 'z%s'%x.group(1), f)
+
+    y = sp.sympify(f)
+
+    def check_degree(x):
+        assert x <= safe_degree, 'Degree must <= %d'%safe_degree
+    
+    if safe_degree is None or safe_degree <= 0:
+        # disable degree check
+        check_degree = lambda x: True
+
+    params = {}
+    for symbol in y.free_symbols:
+        term = str(symbol)
+        if len(term) == 1:
+            tp, degree = term[0], 1
+        else:
+            tp, degree = term[0], int(term[1:])
+        check_degree(degree)
+
+        params[symbol] = _get_transform(tp, degree)
+
+    y = y.subs(params)               
+
+    return y
+
 
 def prove_trig_extrema(
         f: str,
         method: str = 'auto',
         domain: Optional[List] = None,
-        simplify: str = 'full',
+        simplify: str = 'auto',
         linefeed: Optional[bool] = None,
-        print_diff: bool = False
+        print_diff: bool = False,
+        check_degree: int = 10
     ):
     """
     Prove the extrema of a trignometric function.
@@ -45,23 +134,20 @@ def prove_trig_extrema(
     assert method in ['sos', 'derv', 'auto'], "Method should be one of 'sos' or 'derv' or 'auto'."
 
     simplify = simplify.lower()
-    assert simplify in ['full', 'direct', 'none'], "Simplify should be one of 'full' or 'direct' or 'none'."
+    assert simplify in ['auto', 'full', 'direct', 'none'], "Simplify should be one of 'auto' or 'full' or 'direct' or 'none'."
 
     if domain is None:
         domain = [-sp.oo, sp.oo]
     else:
         _default = lambda x, y: y if x is None else sp.tan(sp.sympify(x) / 2)
         domain = [_default(domain[0], -sp.oo), _default(domain[1], sp.oo)]
-        if not domain[0].is_finite: domain[0] = -sp.oo
-        if not domain[1].is_finite: domain[1] = sp.oo
+        if domain[0] == sp.zoo: domain[0] = -sp.oo
+        if domain[1] == sp.zoo: domain[1] = sp.oo
         assert domain[0] <= domain[1], 'Require tan(domain[0]) <= tan(domain[1]).'
 
-    x_ = sp.sympify(f)
-
-    f = f.replace('sin(x)', '((2*t)/(1+t*t))')
-    f = f.replace('cos(x)', '((1-t*t)/(1+t*t))')
-    f = f.replace('tan(x)', '((2*t)/(1-t*t))')
-    y = sp.sympify(f)
+    regf = _convert_string_fill_cdot(f)
+    x_ = sp.sympify(regf)
+    y = _convert_string_to_poly(regf, check_degree)
 
     diff = y.diff('t').factor()
     t = sp.symbols('t')
@@ -107,8 +193,8 @@ def prove_trig_extrema(
         method = 'sos' if extrema_max.is_rational and extrema_min.is_rational else 'derv'
         
     if method == 'derv':
-        s = '换元, 令 $t=\\tan (x/2)$, 则\n$$f(x) = %s = g(t) = %s$$\n$$g(t)=%s\quad g\'(t)=%s$$'%(
-            sp.latex(x_), sp.latex(y), sp.latex(y.factor()), sp.latex(diff))
+        s = '换元, 令 $t=\\tan (x/2)$, 则 $t\\in \\left[%s, %s\\right]$\n$$f(x) = %s = g(t) = %s$$\n$$g(t)=%s\quad g\'(t)=%s$$'%(
+            sp.latex(domain[0]), sp.latex(domain[1]), sp.latex(x_), sp.latex(y), sp.latex(y.factor()), sp.latex(diff))
 
         rootsinfo = ['t_{%d} %s %s\quad'%(i, iseq(z), sp.latex(z)) for i, z in enumerate(extrema)]
         if linefeed is None:
@@ -166,6 +252,7 @@ def _advanced_poly_roots(poly, prec = 20):
 
     for subproblem in problem:
         p = subproblem[0]
+        original_p = p
         
         # if not sp.polys.count_roots(p):
         #     continue 
@@ -225,7 +312,7 @@ def _advanced_poly_roots(poly, prec = 20):
                     p = p.as_expr() - (1 - t*t)**(n-i) * (2*t)**i * p.coeffs()[0] * (-1)**(n-i) / 2 ** i
                     p = p.as_poly(t)
                     
-                assert p is None or p.is_zero, 'Cannot solve all the extrema explicitly.'
+                # assert p is None or p.is_zero, 'Cannot solve all the extrema explicitly.'
 
                 new_p = sum(coeff * t**i for i, coeff in enumerate(new_p_list))
                 new_p = new_p.as_poly(t)
@@ -236,6 +323,7 @@ def _advanced_poly_roots(poly, prec = 20):
                     _addroot(extrema, -1/v - sp.sqrt(1+v**(-2)))
     
         # add numerical roots
+        p = original_p
         if p.degree() > 4:
             for r in sp.polys.nroots(p, n = prec):
                 if r.is_real:
@@ -248,7 +336,7 @@ def _simplify_rational_polyroots(
         target, 
         x, 
         original = None,
-        method = 'full',
+        method = 'auto',
         prec = 20
     ):
     """
@@ -275,6 +363,12 @@ def _simplify_rational_polyroots(
         if not isinstance(v, sp.Rational):
             v = sp.simplify(v)
         return v
+
+    if method == 'auto':
+        if is_rational_quadratic_roots(x):
+            method = 'direct'
+        else:
+            method = 'full'
 
     if method == 'none':
         return target.subs(arg, x)
