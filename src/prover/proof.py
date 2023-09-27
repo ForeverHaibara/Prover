@@ -1,9 +1,30 @@
+import re
+
+class ProofEnvironment():
+    is_gradio = False
+
 class Proof():
     def __init__(self, content = '') -> None:
         self.content = content
 
     def __str__(self) -> str:
-        return str(self.content)
+        content = str(self.content)
+        if ProofEnvironment.is_gradio:
+            replacement = {
+                '\n': ' \n\n ',
+                '$$': '$',
+                '&': ' ',
+                '\\\\': ' $ \n\n  $',
+                '\\begin{aligned}': '',
+                '\\end{aligned}': '',
+                '\\left\\{': '',
+                '\\right.': '',
+            }
+
+            for k,v in replacement.items():
+                content = content.replace(k,v)
+
+        return content
 
     def _repr_latex_(self) -> str:
         content =  self.content
