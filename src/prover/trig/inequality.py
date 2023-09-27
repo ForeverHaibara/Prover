@@ -3,9 +3,27 @@ from functools import lru_cache
 import re
 
 import sympy as sp
+from sympy.printing.precedence import precedence_traditional, PRECEDENCE
 
 from ...basic.types import is_rational_quadratic_roots
+from ...basic.utils import radsimp
 from ..proof import Proof
+
+
+def substitute(f, arg, x, dir = '+-'):
+    if not isinstance(x, sp.Expr) or x.is_finite:
+        try:
+            v = radsimp(f.subs(arg, x))
+            assert v.is_finite
+            return v
+        except:
+            pass
+    v = sp.limit(f, arg, x, dir = dir)
+    try:
+        v = radsimp(v)
+    except:
+        pass
+    return v
 
 
 @lru_cache
@@ -171,10 +189,7 @@ def prove_trig_extrema(
     for i in range(2):
         extrema.append(domain[i])
         extrema_numer.append(domain[i])
-        if domain[i].is_finite:
-            extrema_numerv.append(sp.re(y.subs('t', domain[i]).n(20)))
-        else:
-            extrema_numerv.append(sp.limit(y, 't', domain[i]))
+        extrema_numerv.append(sp.re(substitute(y, 't', domain[i], dir = '+' if i == 0 else '-').n(20)))
 
 
     index_max = max(range(len(extrema_numerv)), key = lambda x: extrema_numerv[x])
@@ -183,30 +198,32 @@ def prove_trig_extrema(
 
     # sometimes the extrema is not rational, we simplify the equality using polynomial operations
     is_boundary = lambda x: None if x == domain[0] or x == domain[1] else problem
-    extrema_max = _simplify_rational_polyroots(y, extrema[index_max], is_boundary(extrema[index_max]), method = simplify)
-    extrema_min = _simplify_rational_polyroots(y, extrema[index_min], is_boundary(extrema[index_min]), method = simplify)
+    dir_ = '+' if extrema_numer[index_max] == domain[0] else '-'
+    extrema_max = _simplify_rational_polyroots(y, extrema[index_max], is_boundary(extrema[index_max]), method = simplify, dir = dir_)
+    extrema_min = _simplify_rational_polyroots(y, extrema[index_min], is_boundary(extrema[index_min]), method = simplify, dir = dir_)
 
     iseq = lambda x: '\\approx ' if isinstance(x, sp.Float) else '='
 
     # generate the proof
     if method == 'auto':
         method = 'sos' if extrema_max.is_rational and extrema_min.is_rational else 'derv'
-        
-    if method == 'derv':
-        s = '换元, 令 $t=\\tan (x/2)$, 则 $t\\in \\left[%s, %s\\right]$\n$$f(x) = %s = g(t) = %s$$\n$$g(t)=%s\quad g\'(t)=%s$$'%(
-            sp.latex(domain[0]), sp.latex(domain[1]), sp.latex(x_), sp.latex(y), sp.latex(y.factor()), sp.latex(diff))
 
-        rootsinfo = ['t_{%d} %s %s\quad'%(i, iseq(z), sp.latex(z)) for i, z in enumerate(extrema)]
+    s = '换元, 令 $t=\\tan (x/2)$, 则 $t\\in \\left[%s, %s\\right]$\n$$f(x) = %s = g(t) = %s$$\n$$g(t)=%s%s$$'%(
+        sp.latex(domain[0]), sp.latex(domain[1]), sp.latex(x_), sp.latex(y), sp.latex(y.factor()), 
+            '\\quad g\'(t)=%s'%sp.latex(diff) if method == 'derv' else '')
+
+    if method == 'derv':
+        rootsinfo = ['t_{%d} %s %s\\quad'%(i, iseq(z), sp.latex(z)) for i, z in enumerate(extrema)]
         if linefeed is None:
             linefeed = True if sum(len(_) for _ in rootsinfo) > 600 else False
 
-        s += '\n解得极值点有 $$%s\\begin{aligned}& %s \\end{aligned}$$%s'%(
+        s += '\n解得极值点有 $$%s\\begin{aligned}& %s \\end{aligned}%s$$'%(
                 ('\\left\\{' if linefeed else ''), 
-                ('\n\\\\ & ' if linefeed else ' ').join(rootsinfo), 
+                ('\\\\ & ' if linefeed else ' ').join(rootsinfo), 
                 ('\\right.' if linefeed else '')
             )
         s += '\n代入验证最小值点 $t_{%d}$, 最大值点 $t_{%d}$'%(index_min, index_max)
-        s += '\n$$%s\\begin{aligned}& g\\left(t_{%d}\\right)%s%s\quad %s g\\left(t_{%d}\\right)%s%s\\end{aligned}%s$$'%(
+        s += '\n$$%s\\begin{aligned}& g\\left(t_{%d}\\right)%s%s\\quad %s g\\left(t_{%d}\\right)%s%s\\end{aligned}%s$$'%(
                 ('\\left\\{' if linefeed else ''),
                 index_min, iseq(extrema_min), sp.latex(extrema_min), 
                 '\\\\ & ' if linefeed else ' ',
@@ -214,19 +231,26 @@ def prove_trig_extrema(
                 ('\\right.' if linefeed else '')
             )
 
-    elif method == 'sos':
-        s = '换元, 令 $t=\\tan (x/2)$, 则\n$$f(x) = %s = g(t) = %s$$'%(sp.latex(x_), sp.latex(y))
-        
+    elif method == 'sos':        
         ext = lambda x: x if (x.is_finite and not x.is_rational and not isinstance(x, sp.Float)) else None
     
-        s += '\n$$\\begin{aligned}%s-g(t)&=%s\\geqslant 0\\\\ %s-g(t)&=%s \\leqslant 0\\end{aligned}$$'%(
-            sp.latex(extrema_max), sp.latex((extrema_max - y).factor(extension = ext(extrema[index_max]))), 
-            sp.latex(extrema_min), sp.latex((extrema_min - y).factor(extension = ext(extrema[index_min]))))
-        s += '\n$f_{\\rm max}%s%s, f_{\\rm min}%s%s$, 取等分别为 $t_{\\rm max}%s%s, t_{\\rm min}%s%s$'%(
-            iseq(extrema_max), sp.latex(extrema_max),
+        def _sos(f, y, ext = None, direction = '>'):
+            add_paren = lambda x: '\\left(%s\\right)'%sp.latex(x) if precedence_traditional(x) < PRECEDENCE['Mul'] else sp.latex(x)
+            if not y.is_finite:
+                return 'g(t)&%s%s'%(direction, sp.latex(y))
+            else:
+                return 'g(t)-%s&=%s %s 0'%(add_paren(y), sp.latex((f - y).factor(extension = ext)),
+                    '\\geqslant' if direction == '>' else '\\leqslant')
+
+        s += '\n$$\\begin{aligned}%s\\\\ %s\\end{aligned}$$'%(
+            _sos(y, extrema_min, ext(extrema[index_min]), direction = '>'),
+            _sos(y, extrema_max, ext(extrema[index_max]), direction = '<'),
+        )
+        s += '\n$f_{\\rm min}%s%s, f_{\\rm max}%s%s$, 取等分别为 $t_{\\rm min}%s%s, t_{\\rm max}%s%s$'%(
             iseq(extrema_min), sp.latex(extrema_min), 
-            iseq(extrema_max), sp.latex(extrema[index_max]),
-            iseq(extrema_min), sp.latex(extrema[index_min]))
+            iseq(extrema_max), sp.latex(extrema_max),
+            iseq(extrema_min), sp.latex(extrema[index_min]),
+            iseq(extrema_max), sp.latex(extrema[index_max]))
     
     return Proof(s)
 
@@ -337,7 +361,8 @@ def _simplify_rational_polyroots(
         x, 
         original = None,
         method = 'auto',
-        prec = 20
+        prec = 20,
+        dir = '+-'
     ):
     """
     Compute target(x) where `x` is the root of polynomial `original` 
@@ -351,18 +376,11 @@ def _simplify_rational_polyroots(
     arg = arg[0]
 
     if isinstance(x, sp.Rational):
-        v = target.subs(arg, x)
-        if not isinstance(v, sp.Rational):
-            v = sp.simplify(v)
-        return v
+        return substitute(target, arg, x, dir = dir)
     elif isinstance(x, sp.Float):
-        v = target.subs(arg, x).n(prec)
-        return v
+        return substitute(target, arg, x, dir = dir).n(prec)
     elif x == sp.oo or x == -sp.oo:
-        v = sp.limit(target, arg, x)
-        if not isinstance(v, sp.Rational):
-            v = sp.simplify(v)
-        return v
+        return substitute(target, arg, x, dir = dir)
 
     if method == 'auto':
         if is_rational_quadratic_roots(x):
@@ -373,7 +391,7 @@ def _simplify_rational_polyroots(
     if method == 'none':
         return target.subs(arg, x)
     elif method == 'direct':
-        return sp.simplify(target.subs(arg, x))
+        return substitute(target, arg, x, dir = dir)
 
     if original is None: 
         original = sp.minimal_polynomial(x).as_poly()
@@ -397,7 +415,7 @@ def _simplify_rational_polyroots(
         coeffs = poly.all_coeffs()
         S = sp.Matrix.zeros(A.shape[0])
         for v in coeffs:
-            # S = sp.simplify(S @ A)
+            # S = radsimp(S @ A)
             S = S @ A
             S += v * sp.Matrix.eye(A.shape[0])
         return S
@@ -406,11 +424,11 @@ def _simplify_rational_polyroots(
     final0 = _poly_matrix(targett[0].as_poly(arg, extension = True), A, original)
     final1 = _poly_matrix(targett[1].as_poly(arg, extension = True), A, original)
     
-    final0 = sp.simplify(final0)
-    final1 = sp.simplify(final1)
+    final0 = radsimp(final0)
+    final1 = radsimp(final1)
 
     final = final0 @ sp.Matrix.inv(final1)
-    final = sp.simplify(final)
+    final = radsimp(final)
 
     det = sp.det(arg * sp.Matrix.eye(final.shape[0]) - final)
     det_ = det.as_poly(arg, extension = True)
