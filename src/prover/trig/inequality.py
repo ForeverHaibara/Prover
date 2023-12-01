@@ -157,7 +157,7 @@ def prove_trig_extrema(
     if domain is None:
         domain = [-sp.oo, sp.oo]
     else:
-        _default = lambda x, y: y if x is None else sp.tan(sp.sympify(x) / 2)
+        _default = lambda x, y: y if x is None else radsimp(sp.tan(sp.sympify(x) / 2))
         domain = [_default(domain[0], -sp.oo), _default(domain[1], sp.oo)]
         if domain[0] == sp.zoo: domain[0] = -sp.oo
         if domain[1] == sp.zoo: domain[1] = sp.oo
