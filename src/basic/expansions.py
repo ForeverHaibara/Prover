@@ -1,83 +1,53 @@
+from typing import Union
+
 import sympy as sp
 
 
-def taylor(f, n = 1):
-    assert n >= 1 and n == int(n), 'n should be a positive integer'
-
-    poly = None
-
+def taylor(
+        f: Union[str, sp.Expr, sp.core.FunctionClass], 
+        n = 3,
+        x0 = 0,
+    ) -> sp.Poly:
+    """
+    Return the taylor expansion of f at x = x0.
+    """
+    x = None
     if isinstance(f, str):
-        vals = [sp.S(0)]
-        f = f.lower()
-        if f.startswith('e') or f.startswith('sin') or f.startswith('cos'):
-            vals[0] = sp.S(1)
-            for i in range(1, n + 1):
-                vals.append(vals[-1] / i)
-            
-            if f.startswith('sin'):
-                for i in range(0, n + 1, 2):
-                    vals[i] = 0
-                for i in range(3, n + 1, 4):
-                    vals[i] = -vals[i]
-            elif f.startswith('cos'):
-                for i in range(1, n + 1, 2):
-                    vals[i] = 0
-                for i in range(2, n + 1, 4):
-                    vals[i] = -vals[i]
-        elif f.startswith('ln'):
-            vals += [(sp.Rational(1,i+1) if i%2==0 else -sp.Rational(1,i+1)) for i in range(n)]
-        
-        elif f.startswith('tan'):
-            # https://math.stackexchange.com/questions/2098941/bernoulli-numbers-taylor-series-expansion-of-tan-x 
-            
-            # bernoulli[i] = C(n,i) * B(2i)
-            #bernoulli = sp.polys.polytools.Poly(sp.bernoulli(3, 'x')).coeffs()
+        try:
+            f = getattr(sp, f)
+        except AttributeError:
+            raise AttributeError('Function %s is not supported.'%f)
+    if isinstance(f, sp.core.function.FunctionClass):
+        x = sp.symbols('x')
+        f = f(x)
 
-            t = sp.S(1)   # 2 ** (2i)
-            s = sp.S(1)   # (2i)!
-            # coeff of x^(2i-1) in tanx = 2^(2i) * (2^(2i) - 1) /  (2i)! * (-1)^(i-1) * B(2i)
-            for i in range(1, n + 1):
-                t = t * 4
-                s = s * (2 * i) * (2 * i - 1)
-                vals.append(t / s * (t - 1) * sp.bernoulli(2 * i))
-                if i % 2 == 0:
-                    vals[-1] = -vals[-1]
-                vals.append(0)
-            
-            if len(vals) > n + 1: 
-                vals.pop()
+    if x is None:
+        x = f.free_symbols.pop()
 
-        elif f.startswith('lambert'):
-            # https://mathworld.wolfram.com/LagrangeInversionTheorem.html
-            # https://math.stackexchange.com/questions/333217/expansion-of-lambert-w-for-negative-values 
-            # lamberw(x) = sum k^(k-1) / k! * x^k   (|x|< 1/e)
-            s = sp.S(1)
-            for i in range(1, n + 1):
-                s = s * i
-                vals.append((-i) ** (i - 1) / s)
-        else:
-            assert False, 'Function %s not supported.'%f
-    
-        t = sp.symbols('x')
-        poly = sum((t**i * v for i, v in enumerate(vals))).as_poly(t)
-
-
-    elif isinstance(f, sp.Expr):
-        assert False, 'Function %s not supported.'%f
-        return None
-
+    poly = f.series(x, x0, n + 1).removeO().as_poly(x)
+    if poly is None:
+        raise ValueError('Failed to compute taylor expansion of %s at x = %s.'%(f, x0))
     return poly
 
 
 def pade(f, m = 3, n = None):
-    # https://math.stackexchange.com/questions/860293 
-    # https://zhuanlan.zhihu.com/p/92873681 
+    """
+    Compute pade expansion of a function at x = 0.
+
+    References
+    ----------
+    [1] https://math.stackexchange.com/questions/860293 
+    
+    [2] https://zhuanlan.zhihu.com/p/92873681 
+    """
     
     if n is None: n = m
     if isinstance(f, str):
         return pade(f = taylor(f, m + n), m = m, n = n)
-    elif isinstance(f, sp.Expr):
-        f = f.as_poly()
+    elif (isinstance(f, sp.Expr) and not isinstance(f, sp.Poly)) or isinstance(f, sp.core.function.FunctionClass):
+        return pade(f = taylor(f, m + n), m = m, n = n)
+    else:
+        t = sp.symbols('x')
     
     if isinstance(f, sp.Poly):
         f = f.all_coeffs()[::-1]
@@ -100,7 +70,6 @@ def pade(f, m = 3, n = None):
     for i in range(m+1):
         p[i] = sum(f[i-j] * q[j] for j in range(min(n+1,i+1)))
 
-    t = sp.symbols('x')
     v = sp.cancel(sum([p[i] * t ** i for i in range(m+1)]) / 
                     sum([q[i] * t ** i for i in range(n+1)]))
 
