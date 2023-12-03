@@ -17,3 +17,13 @@ def radsimp(expr: Union[sp.Expr, List[sp.Expr]]) -> sp.Expr:
     # if n is not S.One:
     expr = (numer*n).expand()/d
     return expr
+
+
+def rational_between(x, y):
+    """
+    Find a rational number between x and y.
+    """
+    tolerance = min(abs(y - x) / sp.S(4) * 3, sp.Rational(1,100))
+    prec = sp.floor(-sp.log(tolerance, 10))
+    middle = ((x + y) / sp.S(2)).n(prec)
+    return sp.nsimplify(middle, tolerance = tolerance, rational = True)
