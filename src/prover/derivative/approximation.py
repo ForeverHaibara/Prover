@@ -2,7 +2,7 @@ from typing import Callable, Union
 
 import sympy as sp
 
-from ...basic.expansions import pade as _pade
+from ...basic.utils import rational_between
 from ..proof import Proof
 
 def lt(x, b = 0):
@@ -30,6 +30,10 @@ def racomp(x, y):
 
 def greatsgn(x, y):
     return '>' if x > y else ('=' if x == y else '<')
+
+def exp_pi(x):
+    return sp.pi ** x
+
 
 
 class _prove_approx:
@@ -104,6 +108,12 @@ class _prove_approx:
                 great = greatsgn(fx, y)
                 return '\\%s %s %s %s'%('sin' if f == sp.sin else 'cos', lt(x,2), great, lt(y))
 
+        elif f == sp.atan or f == sp.asin:
+            if x > 0 and y <= 0:
+                return '\\operatorname{%s} %s > %s'%(f.__name__, lt(x), racomp(0, y))
+            elif x < 0 and y >= 0:
+                return '\\operatorname{%s}\\left(%s\\right) < %s'%(f.__name__, lt(x), racomp(0, y))
+
     @classmethod
     def _get_method_func(cls, method):
         return {
@@ -122,11 +132,11 @@ class _prove_approx:
         maxiter = 10000,
     ):
         if isinstance(f, str):
-            functions = {'e': sp.exp, 'exp': sp.exp, 'ln': sp.ln, 'log': sp.ln, 'sin': sp.sin, 'cos': sp.cos}
-            f = functions.get(f, None)
-            assert f is not None, 'Function f should be one of %s, but received %s.'%(list(functions.keys()), f)
+            try:
+                f = getattr(sp, f)
+            except AttributeError:
+                raise  AttributeError("Function '%s' is not supported."%f)
 
-            
         x, y = sp.Rational(x), sp.Rational(y)
 
         _txt_wrapper = lambda txt: Proof('$$\\begin{aligned}& %s\\end{aligned}$$'%(txt))
@@ -175,6 +185,11 @@ class _prove_approx:
             txt = method_func(sp.exp, -y, 1 / x, err)
         txt += '\\\\ & \\Rightarrow\ \\ln%s %s %s'%(lt(x), great, lt(y))
         return txt
+
+    @classmethod
+    def exp_pi(cls, f, x, y, err, great, method = 'taylor'):
+        method_func = cls._get_method_func(method)
+        return method_func(f, x, y, err)
 
     @classmethod
     def sin(cls, f, x, y, err, great, method = 'taylor'):
@@ -240,13 +255,33 @@ class _prove_approx:
     @classmethod
     def atan(cls, f, x, y, err, great, method = 'taylor'):
         method_func = cls._get_method_func(method)
-        if abs(x) <= sp.pi / 2:
+        if abs(x) <= 1:
             # guarantee convergence
             txt = method_func(f, x, y, err)
             return txt
+        elif abs(y) >= sp.pi / 2:
+            prove_pi = method_func(exp_pi, sp.S(1), abs(y) * 2, err)
+            txt = '%s\\\\ & \\Rightarrow\ %s %s %s\\frac{\\pi}{2} %s %s'%(
+                prove_pi, lt(f(x)), great, '-' if great == '>' else '', great, lt(y)
+            )
+            return txt
         else:
-            # atan(x) = pi/2 - atan(1/x)
-            0
+            # atan(x) = pi/2 - atan(1/x) (x > 0)
+            # first we find a rational number between atan(1/x) and pi/2 - y
+            # we assume sgn(x) == sgn(y)
+            mid = rational_between(f(abs(1/x)), sp.pi / 2 - abs(y))
+            txt = method_func(f, abs(1/x), mid, err)
+            v = abs(y) + mid
+            txt2 = method_func(exp_pi, sp.S(1), 2*v)
+            txt = '%s\\\\ & %s\\\\ & \\Rightarrow\ \\operatorname{atan}\\left(%s\\right)'\
+                ' = %s\\frac{\\pi}{2} %s\\operatorname{atan}\\left(%s\\right)'\
+                '%s %s %s %s = %s'%(
+                    txt, txt2, lt(x), 
+                    '-' if x < 0 else '', '+' if x < 0 else '-', lt(abs(1/x)),
+                    great, lt(-v if x < 0 else v), '-' if x > 0 else '+', lt(mid), lt(y)
+            )
+            return txt
+
 
 
 class _prove_approx_taylor:
@@ -348,12 +383,12 @@ class _prove_approx_taylor:
 
 class _prove_approx_integral:
     """
-    Consider F(n,m) = Integral(x^n*(1-x)^m*g(t,x), (x,0,1)) = a + b*f(t)
+    Consider F(n,m) = Integral(t^n*(1-t)^m*g(x,t), (t,0,1)) = a + b*f(x)
     where a, b are rational numbers and f is the given function.
-    Then f(t) can be expressed as linear combination of many F(n,m).
-    We compute that -a/b - f(t) = - I/b. Hence it converges when I/b -> 0.
+    Then f(x) can be expressed as linear combination of many F(n,m).
+    We compute that -a/b - f(x) = - I/b. Hence it converges when I/b -> 0.
 
-    For example, when f(t) == exp(t), we use g(t,x) = exp(x*t).
+    For example, when f(x) == exp(x), we use g(x,t) = exp(x*t).
 
     Be careful: sometimes the method does not converge. Please ensure 
     the input is valid. Please refer to each function for more details.
@@ -398,10 +433,18 @@ class _prove_approx_integral:
 
     @classmethod
     def exp(cls, f, x, y, err, fx, great):
-        # g(k,x) = exp(kx)
-        # Consider F(n,m) = Integral(x^n*(1-x)^m*exp(kx), (x,0,1))
-        # F(n,m) = m/k F(n,m-1) - n/k F(n-1,m) + (x^n*(1-x)^m*exp(kx)/k)|_0^1
-        # deine F(n,m) = a + b*exp(k) where values[(n,m)] = (a,b)
+        """
+        Consider F(n,m) = Integral(t^n*(1-t)^m*exp(xt), (t,0,1))
+        F(n,m) = m/x F(n,m-1) - n/x F(n-1,m) + (t^n*(1-t)^m*exp(xt)/x)|_0^1
+        deine F(n,m) = a + b*exp(x) where values[(n,m)] = (a,b)
+
+        It converges for all x with factorial convergence rate.
+        Actually it can be shown that for x > 0,
+        (-1)^(n+1) * b_{n,m} = Sum_{j=0}^m C(m,j) * (n+j)! / x^{n+j} * Sum_{k=0}^{n+j}(-x)^{k-1}/k!
+                             ~ Sum_{j=0}^m C(m,j) * (n+j)! / x^{n+j+1} * exp(-x)
+                             > (n+m)!/x^(n+m+1) * exp(-x)
+        Therefore, |-a/b - I| = I/b = o((x/2)^(2n) / (2n)!) when m == n.
+        """
         values = {(0,0): (-1/x, 1/x)}
         n = 1
         def recur(n, m):
@@ -436,13 +479,106 @@ class _prove_approx_integral:
         txt = '%s = \\int_0^1 %s \\text{d}x > 0'%(
             lt(fx - y) if great == '>' else lt(y - fx), lt(integrand))
         return txt
-            
+
+
+    @classmethod
+    def exp_pi(cls, f, x, y, err, fx, great):
+        """
+        This is a special function defined here. f(x) = pi^x.
+        It only supports x == positive integer.
+
+        Consider F(n,m) = Integral((t-1)^m*log(t)^(x-1)/(t^n*(1+t^2)), (t,1,oo)).
+        F(n,0) = -F(n-2,0) + (x-1)! * (n-1)^(-x)
+
+        Let w = 2m/n, then |-a/b - I| ~ C / sqrt(n) * (w/2)^w * (1-w)^(1-w)
+        The best choice is w = 2/3, with convergence rate ~ 3^(-n)/sqrt(n).
+
+        For odd x, the initial value F(0,0) is given by MMA that:
+        F(0,0) = 4^(-x) * Gamma(x) * [Zeta(x,1/4) - Zeta(x,3/4)]
+               = Gamma(x) * Im(PolyLog(x,i))
+               = 2^(x-1) * pi^x * abs(B_x(1/4)) / x    (using [2] when x is odd)
+
+        For even z, MMA outputs:
+        F(1,0) = 4^(-z) * (2^z - 2) * Gamma(z) * Zeta(z)  (when z is even)
+
+        References
+        ----------
+        [1] https://mathworld.wolfram.com/HurwitzZetaFunction.html
+
+        [2] https://functions.wolfram.com/ZetaFunctionsandPolylogarithms/PolyLog/17/02/01/01/0005/
+        """
+        if (not x.is_integer) or x <= 0:
+            return None
+
+        _gammax = sp.factorial(x-1)
+        if x % 2 == 1:
+            values = {(0,0): (sp.S(0), 2**(x - 1) * abs(sp.bernoulli(x, sp.S(1)/4)) / x)}
+            base = 6
+        elif x % 2 == 0:
+            values = {(1,0): (sp.S(0), 4**(-x) * (2**x - 2) * _gammax * (sp.zeta(x) / sp.pi**x))}
+            base = 7
+
+        n = 1
+        while True:
+            for r in range(base - 4, base + 1, 2):
+                a1, b1 = values[(r-2,0)]
+                a2, b2 = -a1 + _gammax*(r-1)**(-x), -b1
+                values[(r,0)] = (a2, b2)
+
+            for m in (2*n, 2*n - 1):
+                a, b = sp.S(0), sp.S(0)
+                for k in range(m + 1):
+                    # expand (x^2-1)^m
+                    a1, b1 = values[(base-2*k, 0)]
+                    coeff = sp.binomial(m, k) * (-1)**(m-k)
+                    a, b = a + coeff * a1, b + coeff * b1
+                values[(base,m)] = (a, b)
+
+            uv = cls._lin_comb(f, x, y, values, (base,2*n-1), (base,2*n))
+            if uv is not None:
+                break
+
+            n += 1
+            base += 6
+            # when x is odd, base = 6*n;  when x is even, base = 6*n + 1
+
+        u, v = uv
+        if u <= 0 and v <= 0:
+            u, v = -u, -v
+        z = sp.symbols('x')
+        integrand = (z**2-1)**(2*n-1) * (u + v*(z**2-1)).together() / z**base / (1 + z**2) * sp.log(z)**(x-1)
+        txt = '%s = \\int_1^{\\infty} %s \\text{d}x > 0'%(
+            lt(fx - y) if great == '>' else lt(y - fx), lt(integrand))
+        return txt
+
+    @classmethod
+    def log(cls, f, x, y, err, fx, great):
+        """
+        WLOG we assume x > 1 to compute log(x).
+        Consider F(n,m) = Integral(t^n*(1-t)^m/(1+(x-1)t), (t,0,1))
+        F(n,0) = -1/(x-1) * F(n-1,0) + 1/[n(x-1)]
+
+        If fixing the ratio of m/n = a, we have
+        |-a/b - I| = I/b ~ sqrt(pi/n) * (x-1) / (x + sqrt(a)) * z^n
+        where z = [x^(-a) * (x-1)^(a+1)] / [sqrt(a)^a * (sqrt(a) + 1)^(a+1)].
+
+        To ensure convergence, a needs to be sufficiently large, e.g. a >= x^2.
+        This requires very high degree and is therefore impractical. DO NOT USE IT.
+        """
+        raise NotImplementedError
 
     @classmethod
     def atan(cls, f, x, y, err, fx, great):
-        # Consider F(n,m) = Integral(x^(2n)*(1-x^2)^m/(1+(kx)^2), (x,0,1))
-        # F(n,m) = 1/k^2 * [-F(n-1, m) + Integral(x^(2n-2)*(1-x^2)^m, (x,0,1))]
-        # where Integral(x^(2n-2)*(1-x^2)^m, (x,0,1)) = B(n - 1/2, m + 1) / 2
+        """
+        Consider F(n,m) = Integral(t^(2n)*(1-t^2)^m/(1+(xt)^2), (t,0,1))
+        F(n,m) = 1/x^2 * [-F(n-1, m) + Integral(t^(2n-2)*(1-t^2)^m, (t,0,1))]
+        where Integral(t^(2n-2)*(1-t^2)^m, (t,0,1)) = B(n - 1/2, m + 1) / 2
+
+        We can actually compute that 
+        F(n,n) = (-1)^n(x^2+1)^n / x^(4n+1) * arctan(x) + q
+        And |-a/b - I| ~ (x/2)^(2n) / (1 + x^2/2) * sqrt(pi/2/n).
+        Hence the method converges only when |x| <= 2.
+        """
         values = {(0,0): (sp.S(0), 1/x)} # F(0,0) = 0 + atan(x) / x
         n = 1
         def _half_beta(n, m):
@@ -494,134 +630,6 @@ class _prove_approx_integral:
         txt = '%s = \\int_0^1 %s \\text{d}x > 0'%(
             lt(fx - y) if great == '>' else lt(y - fx), lt(integrand))
         return txt
-
-
-
-
-def prove_pade(f = 'exp', m = 3, n = None):
-    """
-    0
-    """
-    if n is None: n = m
-
-    f = f.lower()
-    if f.startswith('e'):
-        result = _prove_pade_exp(m, n)
-    elif f in ('ln', 'log'):
-        result = _prove_pade_log(m, n)
-    elif f in ('sin', 'cos', 'tan'):
-        result = _prove_pade_trig(m, n, f = f)
-
-    result = '$$\\begin{aligned}%s\\end{aligned}$$'%(result)
-
-    return Proof(result)
-
-
-
-def _prove_pade_exp(m, n):
-    pade = _pade('exp', m, n)
-    result = 'f(x) &= \\ln\\left(%s\\right) - x\\\\\n'%(sp.latex(pade))
-    derv = sp.cancel(pade.diff() / pade - 1)
-    result += 'f\'(x) &= %s \\%ceqslant 0'%(
-        sp.latex(derv), 'g' if m <= n+1 else 'l')
-    return result
-
-
-
-def _prove_pade_log(m, n):
-    t = sp.symbols('x')
-    pade = _pade('ln', m, n)
-    result = 'f(x) &= %s - \\ln(x+1)\\\\\n'%(sp.latex(pade))
-    derv = sp.cancel(-(t+1)**(-1) + pade.diff(t))
-    result += 'f\'(x) &= %s \\%ceqslant 0'%(
-        sp.latex(derv), 'g' if m > n else 'l')
-    return result
-
-
-
-def _prove_pade_trig(m, n, f):
-    t = sp.symbols('x')
-    if f.startswith('sin'):
-        assert m == n and m % 2 == 1, 'Only support m = n are equal odd numbers for sin(x).'
-        
-        pade = _pade(f, m, n)
-        p , q = sp.fraction(pade)
-
-        if m % 4 == 1:
-            p , q = -p, -q
-        # f(x) = qsinx - p
-        result = 'f(x) &= \\left(%s\\right)\\sin x -\\left(%s\\right)\quad (x\\geqslant 0)\\\\\n'%(
-                    sp.latex(q), sp.latex(p))
-
-        w = p
-        p = sp.S(0)
-        for i in range(m + 1):
-            # qsinx + pcosx -> (q' - p)sinx + (q + p')cosx
-            q , p = q.diff(t) - p , q + p.diff(t)
-            # if verbose >= 1 and i < m:
-            #     w = w.diff(t)
-            #     result += 'f^{(%d)}(x) &= \\left(%s\\right)\\sin x + \\left(%s\\right)\\cos x - \\left(%s\\right)\\\\\n'%(
-            #         i + 1, sp.latex(q), sp.latex(p), sp.latex(w))
-
-        result += 'f^{(%d)}(x) &= \\left(%s\\right)\\sin x + \\left(%s\\right)\\cos x\\\\\n'%(
-                    m + 1, sp.latex(q), sp.latex(p))
-
-        result += 'g(x) &= x + \\arctan\\frac{%s}{%s}\\quad (x\\geqslant 0)\\\\\n'%(sp.latex(p), sp.latex(q))
-        derv    = sp.cancel(1 + 1 / (1 + p * p / q / q) * (p / q).diff(t))
-        result += 'g\'(x) &= %s\\geqslant 0\\\\\n'%(sp.latex(derv))
-
-        result += '\\Rightarrow g(x)&\\geqslant 0\ (x\\geqslant 0)\\Rightarrow f^{(%d)}(x)'%(m + 1)
-        result += '\\geqslant 0\\Rightarrow \\cdots \\Rightarrow f(x)\\geqslant 0\\ (x\\geqslant 0)\\\\\n'
-
-        p , q = sp.fraction(pade)
-        result += '\\Rightarrow \\sin x&\\%ceqslant \\frac{%s}{%s}\\quad (x\\geqslant 0)'%(
-                        'g' if m % 4 == 3 else 'l', sp.latex(p), sp.latex(q))
-                    
-    elif f.startswith('cos'):
-        assert m == n and m % 2 == 0, 'Only support m = n are equal even numbers for cos(x).'
-
-        pade = _pade(f, m, n)
-        p , q = sp.fraction(pade)#, power = power)
-
-        if m % 4 == 0:
-            p , q = -p, -q
-        # f(x) = qcosx - p
-        result = 'f(x) &= \\left(%s\\right)\\cos x -\\left(%s\\right)\quad (x\\geqslant 0)\\\\\n'%(
-                    sp.latex(q), sp.latex(p))
-
-        w = p
-        p = t - t # = 0
-        for i in range(m + 1):
-            # qcosx + psinx -> (q' + p)cosx + (-q + p')sinx
-            q , p = q.diff(t) + p , p.diff(t) - q
-            # if verbose >= 1 and i < m:
-            #     w = w.diff(t)
-            #     result += 'f^{(%d)}(x) &= \\left(%s\\right)\\cos x + \\left(%s\\right)\\sin x - \\left(%s\\right)\\\\\n'%(
-            #         i + 1, sp.latex(q), sp.latex(p), sp.latex(w))
-
-        result += 'f^{(%d)}(x) &= \\left(%s\\right)\\cos x + \\left(%s\\right)\\sin x\\\\\n'%(
-                    m + 1, sp.latex(q), sp.latex(p))
-
-        result += 'g(x) &= x + \\arctan\\frac{%s}{%s}\\quad (x\\geqslant 0)\\\\\n'%(sp.latex(q), sp.latex(p))
-        derv    = sp.cancel(1 + 1 / (1 + q * q / p / p) * (q / p).diff(t))
-        result += 'g\'(x) &= %s\\geqslant 0\\\\\n'%(sp.latex(derv))
-
-        result += '\\Rightarrow g(x)&\\geqslant 0\ (x\\geqslant 0)\\Rightarrow f^{(%d)}(x)'%(m + 1)
-        result += '\\geqslant 0\\Rightarrow \\cdots \\Rightarrow f(x)\\geqslant 0\\ (x\\geqslant 0)\\\\\n'
-
-        p , q = sp.fraction(pade)
-        result += '\\Rightarrow \\cos x&\\%ceqslant \\frac{%s}{%s}\\quad (x\\geqslant 0)'%(
-                        'g' if m % 4 == 2 else 'l', sp.latex(p), sp.latex(q))
-    
-    elif f == 'tan':
-        pade = _pade(f, m, n)
-        assert pade is not sp.nan, 'Unexisted Pade orders for tan(x). Try m = n = odd numbers.'
-
-        result  = 'f(x) &= x - \\arctan %s\\\\\n'%(sp.latex(pade))
-        derv = sp.cancel(1 - pade.diff(t) / (1 + pade * pade))
-        result += 'f\'(x) &= %s \\geqslant 0'%(sp.latex(derv))
-
-    return result
 
 
 prove_approx = _prove_approx._solve
