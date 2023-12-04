@@ -19,10 +19,15 @@ class Proof():
                 '\\end{aligned}': '',
                 '\\left\\{': '',
                 '\\right.': '',
+                # '\\sum': '\\displaystyle\\sum',
+                # '\\int': '\\displaystyle\\int',
+                # '\\lim': '\\displaystyle\\lim',
             }
 
             for k,v in replacement.items():
                 content = content.replace(k,v)
+
+            content = re.sub('\$(.*?)\$', '$\\\displaystyle \\1$', content, flags=re.DOTALL)
 
         return content
 
