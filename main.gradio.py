@@ -1,6 +1,6 @@
 # https://github.com/ForeverHaibara
 
-# pip install gradio --upgrade
+# pip install gradio==3.44.4
 # pip install sympy
 
 import gradio as gr
@@ -66,7 +66,7 @@ class Approximant(Page):
             with gr.Row():
                 self.formula_input = gr.Textbox(label="Function", placeholder="Input some functions like exp(5/4)-7/2", scale=3)
                 self.compute_btn = gr.Button("Solve", scale=1, variant="primary")
-            self.method_input = gr.Radio(choices=["taylor", "integral"], label="Method", value = "taylor")
+            self.method_input = gr.Radio(choices=["series", "integral"], label="Method", value = "series")
 
             with gr.Tabs():
                 with gr.Tab("Display"):
