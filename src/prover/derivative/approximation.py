@@ -2,7 +2,7 @@ from typing import Callable, Union
 
 import sympy as sp
 
-from ...basic.utils import rational_between
+from ...basic.utils import rational_between, radsimp
 from ..proof import Proof
 
 def lt(x, b = 0):
@@ -40,11 +40,19 @@ class _prove_approx:
     """
     Prove f(x) >= y or f(x) <= y where x and y are both rational numbers.
 
-    If err is not None, prove that |f(x) - y| <= err.
+    FUTURE PLAN: If err is not None, prove that |f(x) - y| <= err. THIS IS 
+    CURRENTLY NOT IMPLEMENTED.
 
     Parameters
     -------
     f: callable or str
+        Sympy function.
+    x: Rational
+        The input of f.
+    y: Rational
+        The target value.
+    method: str
+        One of 'series' or 'integral'.
     """
     def __new__(cls, *args, **kwargs):
         return cls._solve(*args, **kwargs)
@@ -94,21 +102,21 @@ class _prove_approx:
                 sp.exp: 'e^{%s}'%lt(x,1), 
                 sp.sin: '\\sin %s'%lt(x,2),
                 sp.cos: '\\cos %s'%lt(x,2),
-            }.get(f, f.__name__)
+            }.get(f, None)
             if name is None:
-                return '%s = %s'%(f(sp.UnevaluatedExpr(x)), racomp(fx, y))
+                return '%s = %s'%(lt(f(sp.UnevaluatedExpr(x))), racomp(fx, y))
             return '%s = %s'%(name, racomp(fx, y))
 
-        if f == sp.exp:
+        if f == sp.exp or f.__name__ == 'exp_pi':
             if y <= 0:
-                return 'e^{%s} > %s'%(lt(x), racomp(0, y))
+                return '%s > %s'%(lt(f(x)), racomp(0, y))
 
         elif f == sp.sin or f == sp.cos:
             if y <= -1 or y >= 1:    
                 great = greatsgn(fx, y)
                 return '\\%s %s %s %s'%('sin' if f == sp.sin else 'cos', lt(x,2), great, lt(y))
 
-        elif f == sp.atan or f == sp.asin:
+        if f in (sp.sin, sp.tan, sp.asin, sp.atan):
             if x > 0 and y <= 0:
                 return '\\operatorname{%s} %s > %s'%(f.__name__, lt(x), racomp(0, y))
             elif x < 0 and y >= 0:
@@ -117,7 +125,7 @@ class _prove_approx:
     @classmethod
     def _get_method_func(cls, method):
         return {
-            'taylor': _prove_approx_taylor,
+            'series': _prove_approx_series,
             'integral': _prove_approx_integral,
         }[method]
 
@@ -128,8 +136,7 @@ class _prove_approx:
         x: Union[int, float, sp.Rational],
         y: Union[int, float, sp.Rational],
         err: Union[int, float, sp.Rational] = None,
-        method: str = 'taylor',
-        maxiter = 10000,
+        method: str = 'series',
     ):
         if isinstance(f, str):
             try:
@@ -161,9 +168,9 @@ class _prove_approx:
 
 
     @classmethod
-    def exp(cls, f, x, y, err, great, method = 'taylor'):
+    def exp(cls, f, x, y, err, great, method = 'series'):
         method_func = cls._get_method_func(method)
-        if method == 'taylor':
+        if method == 'series':
             if x >= 0 or y <= 0:
                 txt = method_func(f, x, y, err)
             else:
@@ -174,7 +181,7 @@ class _prove_approx:
         return txt
 
     @classmethod
-    def log(cls, f, x, y, err, great, method = 'taylor'):
+    def log(cls, f, x, y, err, great, method = 'series'):
         method_func = cls._get_method_func(method)
         if x <= 0:
             return None
@@ -187,20 +194,20 @@ class _prove_approx:
         return txt
 
     @classmethod
-    def exp_pi(cls, f, x, y, err, great, method = 'taylor'):
+    def exp_pi(cls, f, x, y, err, great, method = 'series'):
         method_func = cls._get_method_func(method)
         return method_func(f, x, y, err)
 
     @classmethod
-    def sin(cls, f, x, y, err, great, method = 'taylor'):
+    def sin(cls, f, x, y, err, great, method = 'series'):
         return cls._sin_or_cos_handler(f, x, y, err, great, method = method)
 
     @classmethod
-    def cos(cls, f, x, y, err, great, method = 'taylor'):
+    def cos(cls, f, x, y, err, great, method = 'series'):
         return cls._sin_or_cos_handler(f, x, y, err, great, method = method)
 
     @classmethod
-    def _sin_or_cos_handler(cls, f, x, y, err, great, method = 'taylor'):
+    def _sin_or_cos_handler(cls, f, x, y, err, great, method = 'series'):
         method_func = cls._get_method_func(method)
         if (0 <= x <= 2 * sp.pi) or (y <= -1 or y >= 1):
             txt = method_func(f, x, y, err)
@@ -244,7 +251,7 @@ class _prove_approx:
             )
             err3 = abs(k * 2 * err2)
             target = flip * (y + err3) if great == '>' else flip * (y - err3)
-            middle = _prove_approx_taylor(f, x - k*t2, target, err)
+            middle = _prove_approx_series(f, x - k*t2, target, err)
 
             lipschitz = cls._lipschitz(f, x-k*sp.pi, flip * y, x-k*t2, 1, target, err3, flip = flip)
             txt += '\\\\ & %s\\\\ & \\Rightarrow \\%s %s = %s'%(
@@ -253,7 +260,56 @@ class _prove_approx:
         return txt
 
     @classmethod
-    def atan(cls, f, x, y, err, great, method = 'taylor'):
+    def tan(cls, f, x, y, err, great, method = 'series'):
+        method_func = cls._get_method_func(method)
+        if abs(x) <= sp.pi / 2:
+            return method_func(f, x, y, err)
+
+    @classmethod
+    def asin(cls, f, x, y, err, great, method = 'series'):
+        method_func = cls._get_method_func(method)
+        if (method == 'series' and abs(x) < 1) or (method == 'integral' and abs(x**2) <= sp.S(1)/2):
+            txt = method_func(f, x, y, err)
+            return txt
+        elif abs(y) >= sp.pi / 2 or abs(x) == 1:
+            prove_pi = method_func(exp_pi, sp.S(1), abs(y) * 2, err)
+            if abs(x) == 1:
+                txt = '%s\\\\ & \\Rightarrow\ \\operatorname{asin}\\left(%s\\right) = %s\\frac{\\pi}{2} %s %s'%(
+                    prove_pi, lt(x), '-' if x < 0 else '', great, lt(y)
+                )
+            else:
+                txt = '%s\\\\ & \\Rightarrow\ \\operatorname{asin}\\left(%s\\right) %s %s\\frac{\\pi}{2} %s %s'%(
+                    prove_pi, lt(x), great, '-' if great == '>' else '', great, lt(y)
+                )
+            return txt
+        else:
+            # asin(x) = pi/2 - asin(sqrt(1-x^2)) (x > 0)
+            # we need to compare sqrt(1-x^2) and sin(pi/2 - y) = cos(y)
+            x_ = sp.sqrt(1-x**2)
+            if isinstance(x_, sp.Rational):
+                mid = x_
+            else:
+                mid = rational_between(x_, sp.cos(y))
+            mid2 = rational_between(sp.asin(mid), sp.pi / 2 - abs(y))
+            # asin(mid) ~ mid2
+            txt = method_func(f, mid, mid2, err)
+            v = abs(y) + mid2
+            txt2 = method_func(exp_pi, sp.S(1), 2*v)
+            txt = '%s\\\\ & %s\\\\ & \\Rightarrow\ \\operatorname{asin}\\left(%s\\right)'\
+                ' = %s\\frac{\\pi}{2} %s\\operatorname{asin}\\left(%s\\right)'\
+                '%s'\
+                ' %s %s %s %s = %s'%(
+                    txt, txt2, lt(x),
+                    '-' if x < 0 else '', '+' if x < 0 else '-', lt(x_),
+                    ' %s %s\\frac{\\pi}{2} %s\\operatorname{asin}\\left(%s\\right)'%(
+                        great, '-' if x < 0 else '', '+' if x < 0 else '-', lt(mid)
+                    ) if not isinstance(x_, sp.Rational) else '',
+                    great, lt(-v if x < 0 else v), '-' if x > 0 else '+', lt(mid2), lt(y)
+            )
+            return txt
+
+    @classmethod
+    def atan(cls, f, x, y, err, great, method = 'series'):
         method_func = cls._get_method_func(method)
         if abs(x) <= 1:
             # guarantee convergence
@@ -261,8 +317,8 @@ class _prove_approx:
             return txt
         elif abs(y) >= sp.pi / 2:
             prove_pi = method_func(exp_pi, sp.S(1), abs(y) * 2, err)
-            txt = '%s\\\\ & \\Rightarrow\ %s %s %s\\frac{\\pi}{2} %s %s'%(
-                prove_pi, lt(f(x)), great, '-' if great == '>' else '', great, lt(y)
+            txt = '%s\\\\ & \\Rightarrow\ \\operatorname{atan}\\left(%s\\right) %s %s\\frac{\\pi}{2} %s %s'%(
+                prove_pi, lt(x), great, '-' if great == '>' else '', great, lt(y)
             )
             return txt
         else:
@@ -284,16 +340,12 @@ class _prove_approx:
 
 
 
-class _prove_approx_taylor:
+class _prove_approx_series:
     """
     Supports a small range of case proving f(x) >= y or f(x) <= y
     where x and y are both rational numbers using Taylor expansion
     Lagrange's mean value theorem might be implicitly
     used for estimating truncation error.
-
-    When f == sp.exp, only supports x >= 0.
-
-    When f == sp.sin, only supports 0 <= x <= 2pi.
 
     No checking is performed for the validity of the input, as this is
     not expected to be used by end users. Please refer to the main
@@ -317,6 +369,7 @@ class _prove_approx_taylor:
 
     @classmethod
     def exp(cls, f, x, y, err, fx, great):
+        """Only supports x > 0."""
         t, c, n = sp.S(0), sp.S(1), 0
         if great == '>':
             criterion = lambda c, t, y: t >= y
@@ -342,7 +395,52 @@ class _prove_approx_taylor:
         return txt
 
     @classmethod
+    def exp_pi(cls, f, x, y, err, fx, great):
+        """
+        Currently only supports positive integer x.
+
+        For even numbers, we use the following idea:
+        pi^(2k) = C * zeta(2n+2k) / zeta(2n) for arbitrary integer n
+        where C = |B_{2n}|/|B_{2n+2k}| * (2n+2k)!/(2n)!/2^(2k)
+        Thus, C > pi^(2k) > C / (1 + 3/2^{2n})
+        """
+        if (not x.is_integer) or x <= 0:
+            return None
+        if x % 2 == 0:
+            n = 1
+            def _compute_C(n):
+                return abs(sp.bernoulli(2*n)) / abs(sp.bernoulli(2*n + x)) * \
+                    sp.factorial(2*n + x) / sp.factorial(2*n) / 2**(x)
+            if great == '>':
+                criterion = lambda n, c, y: c / (1 + sp.S(3)*sp.S(2)**(-2*n)) >= y
+            else:
+                criterion = lambda n, c, y: c <= y
+            while True:
+                c = _compute_C(n)
+                if criterion(n, c, y):
+                    break
+                n += 1
+
+            C_ = '\\frac{%d!|B_{%d}|}{%d!|B_{%d}|}\\cdot 2^{%d}'%(2*n+x, 2*n, 2*n, 2*n+x, -x)
+            if great == '>':
+                txt = '\\pi^{%d} = %s\\cdot\\frac{\\zeta(%d)}{\\zeta(%d)} > %s \\cdot \\frac{1}{1 + \\frac{3}{2^{%d}}} = %s'%(
+                    x, C_, 2*n+x, 2*n, C_, 2*n, racomp(c / (1 + sp.S(3)*sp.S(2)**(-2*n)), y)
+                )
+            else:
+                txt = '\\pi^{%d} = %s\\frac{\\zeta(%d)}{\\zeta(%d)} < %s = %s'%(
+                    x, C_, 2*n+x, 2*n, C_, racomp(c, y)
+                )
+            return txt
+
+        elif x % 2 == 1:
+            y_sq = y**2
+            txt = cls.exp_pi(f, x*2, y_sq, err, fx, great)
+            txt += '\\\\ & \\Rightarrow\ %s %s \\sqrt{%s} %s %s'%(lt(exp_pi(x)), great, lt(y_sq), great, lt(y))
+            return txt
+
+    @classmethod
     def sin(cls, f, x, y, err, fx, great):
+        """Only supports x > 0."""
         if great == '>':
             criterion = lambda n, t, y: t >= y and (n // 2) % 2 == 1
         else:
@@ -356,6 +454,7 @@ class _prove_approx_taylor:
 
     @classmethod
     def cos(cls, f, x, y, err, fx, great):
+        """Only supports x > 0."""
         if great == '>':
             criterion = lambda n, t, y: t >= y and (n // 2) % 2 == 1
         else:
@@ -379,6 +478,152 @@ class _prove_approx_taylor:
                 break
             n += 2
         return t, c, n
+
+    @classmethod
+    def tan(cls, f, x, y, err, fx, great):
+        """
+        Only supports -pi/2 < x < pi/2. 
+        This is because pi/2 is the first singularity of tan(x).
+        The Taylor expansion of tan(x) is given by
+        tan(x) = Sum_{k=1}^{inf} (2^(2k)-1)*2^(2k)/(2k)! * |B_{2k}| * x^{2k-1}
+               = Sum_{k=1}^{inf} (2^(2k)-1)/pi^(2k) * 2 * zeta(2k) * x^{2k-1}
+        where B_{2k} are Bernoulli numbers and zeta is the Riemann zeta function.
+        There is relation that |B_{2k}|/(2k)! = 2 * zeta(2k) / (2*pi)^(2k)
+
+        Clearly the coefficient is monotonically decreasing from the definition of zeta.
+        The remainder term is bounded by
+        R_n = (2^(2n+1)-1)/pi^(2n) * zeta(2n) * x^(2n)
+            Sum_{k>n} (2^(2k)-1)/(2^(2n+1)-1) / pi^(2(k-n)) * 2 * zeta(2k)/zeta(2n) * x^{2(k-n)-1}
+            < (2^(2n+1)-1)/pi^(2n) * zeta(2n) * x^(2n) * tan(x)
+        """
+        if x < 0:
+            x, y, sgn, great = -x, -y, -1, chr(122 - ord(great))
+        else:
+            sgn = 1
+        # z = 2^(2n), w = x^(2n-1) / (2n)!
+        t, c, n, z, w = sp.S(0), x, 1, 4, x / 2
+        if great == '>':
+            criterion = lambda n, t, y: t >= y
+        else:
+            def criterion(n, t, y):
+                coeff = (2**(2*n+1)-1) * (sp.zeta(2*n)/sp.pi**(2*n)) * x**(2*n)
+                return coeff < 1 and t / (1 - coeff) <= y
+
+        while True:
+            t += c
+            if criterion(n, t, y):
+                break
+            z *= 4
+            w *= x**2 / (2*n + 1) / (2*n + 2)
+            c  = (z - 1) * z * w * abs(sp.bernoulli(2*n + 2))
+            n += 1
+
+        if great == '>':
+            txt = '\\tan\\left(%s\\right) > \\sum_{k=1}^{%d} \\frac{(2^{2k+1}-2)\\zeta(2k)}{\\pi^{2k}}%s^k = %s'%(
+                        lt(x), n, lt(x,1), racomp(t,y))
+        else:
+            coeff_ = (2**(2*n+1)-1) * (sp.zeta(2*n)/sp.pi**(2*n)) * x**(2*n)
+            main = '\\sum_{k=1}^{%d} \\frac{2(2^{2k}-1)\\zeta(2k)}{\\pi^{2k}}%s^{2k-1}'%(n, lt(x,1))
+            remain_coeff = '\\frac{(2^{%d}-1)\\zeta(%d)}{\\pi^{%d}}%s^{%d}'%(
+                                2*n + 1, 2*n, 2*n, lt(x,1), 2*n
+            )
+            remainder = '\\sum_{k=%d}^{\\infty}\\frac{2(2^{2k}-1)}{(2^{%d}-1)\\pi^{2(k-%d)}}'\
+                        '\cdot\\frac{\\zeta(2k)}{\\zeta(%d)}%s^{2(k-%d)-1}'%(
+                            n + 1, 2*n + 1, n, 2*n, lt(x,1), n
+            )
+            txt = '\\tan\\left(%s\\right) = %s + %s%s'\
+                '<%s + %s\\tan\\left(%s\\right)\\\ & \\Rightarrow\ \\tan\\left(%s\\right) < %s'%(
+                    lt(x), main, remain_coeff , remainder, 
+                    main, remain_coeff, lt(x), lt(x), racomp(t / (1 - coeff_), y)
+            )
+        if sgn == -1:
+            txt += '\\\\ & \\Rightarrow\ \\tan\\left(%s\\right) = -\\tan\\left(%s\\right) %s %s'%(
+                lt(-x), lt(x), chr(122 - ord(great)), lt(-y)
+            )
+        return txt
+
+    @classmethod
+    def asin(cls, f, x, y, err, fx, great):
+        """Only supports -1 < x < 1."""
+        if x < 0:
+            x, y, sgn, great = -x, -y, -1, chr(122 - ord(great))
+        else:
+            sgn = 1
+        t, c, n = sp.S(0), x, 0
+        if great == '>':
+            criterion = lambda c, t, y: t >= y
+        else:
+            # asin(x) < t + c * (1 + x^2 + x^4 + ...) = t + c / (1 - x^2)
+            criterion = lambda c, t, y: t + c / (1 - x**2) <= y
+
+        while True:
+            t += c
+            c *= sp.S((2*n + 1)**2) / (2*n + 2) / (2*n + 3) * x**2
+            if criterion(c, t, y):
+                break
+            n += 1
+
+        if great == '>':
+            txt = '\\operatorname{asin}\\left(%s\\right) > \\sum_{k=0}^{%d} \\frac{(2k-1)!!}{(2k)!!(2k+1)}%s^{2k+1} = %s'%(
+                        lt(x), n, lt(x,1), racomp(t,y))
+        else:
+            txt = '\\operatorname{asin}\\left(%s\\right) < \\sum_{k=0}^{%d} \\frac{(2k-1)!!}{(2k)!!(2k+1)}%s^{2k-1}'\
+                '+ \\frac{%d!!}{%d!!\\cdot %d}\\cdot \\frac{%s^{%d}}{1 - %s^{2}} = %s'%(
+                    lt(x), n, lt(x,1), 
+                    2*n+1, 2*n+2, 2*n+3, lt(x,1), 2*n+1, lt(x,1), racomp(t + c / (1 - x**2), y)
+            )
+        if sgn == -1:
+            txt += '\\\\ & \\Rightarrow\ \\operatorname{asin}\\left(%s\\right) = -\\operatorname{asin}\\left(%s\\right) %s %s'%(
+                lt(-x), lt(x), chr(122 - ord(great)), lt(-y)
+            )
+        return txt
+
+    @classmethod
+    def atan(cls, f, x, y, err, fx, great):
+        """
+        We shall use the series given by Euler that:
+        atan(x) = z / x * Sum_{k=0} (2k)!!/(2k+1)!! * z^k
+        where z = x^2 / (1 + x^2) < 1.
+
+        This ensures global convergence. However, it is still suggested
+        x be small.
+        """
+        if x < 0:
+            x, y, sgn, great = -x, -y, -1, chr(122 - ord(great))
+        else:
+            sgn = 1
+        z = x**2 / (1 + x**2)
+        t, c, n = sp.S(0), z / x, 0
+        if great == '>':
+            criterion = lambda c, t, y: t >= y
+        else:
+            # asin(x) < t + c * (1 + z + z^2 + ...) = t + c / (1 - z)
+            criterion = lambda c, t, y: t + c / (1 - z) <= y
+
+        while True:
+            t += c
+            c *= sp.S(2*n + 2) / (2*n + 3) * z
+            if criterion(c, t, y):
+                break
+            n += 1
+
+        if great == '>':
+            txt = '\\operatorname{atan}\\left(%s\\right) > \\frac{1}{%s + %s}\\sum_{k=0}^{%d}'\
+                    '\\frac{(2k)!!}{(2k+1)!!}\\left(\\frac{1}{1+%s^{-2}}\\right)^{k} = %s'%(
+                        lt(x), lt(x), lt(1/x), n, lt(x,1), racomp(t,y))
+        else:
+            txt = '\\operatorname{atan}\\left(%s\\right) < \\frac{1}{%s + %s}\\left[\\sum_{k=0}^{%d}'\
+                    '\\frac{(2k)!!}{(2k+1)!!}\\left(\\frac{1}{1+%s^{-2}}\\right)^{k}'\
+                    '+ \\frac{%d!!}{%d!!}\\sum_{k=%d}^{\\infty}\\left(\\frac{1}{1+%s^{-2}}\\right)^{k}\\right] = %s'%(
+                    lt(x), lt(x), lt(1/x), n,
+                    lt(x,1),
+                    2*n+2, 2*n+3, n+1, lt(x,1), racomp(t + c / (1 - z), y)
+            )
+        if sgn == -1:
+            txt += '\\\\ & \\Rightarrow\ \\operatorname{atan}\\left(%s\\right) = -\\operatorname{atan}\\left(%s\\right) %s %s'%(
+                lt(-x), lt(x), chr(122 - ord(great)), lt(-y)
+            )
+        return txt
 
 
 class _prove_approx_integral:
@@ -417,6 +662,18 @@ class _prove_approx_integral:
             if criterion(u, v):
                 return u, v
         return None
+
+    @classmethod
+    def _binomial(cls, values, n, m, d = 1, r = sp.S(-1), mul = 1):
+        """
+        Return mul * Sum_{k=0}^m C(m,k) * r^k * values[(n+kd,0)]
+        """
+        a, b, rk = sp.S(0), sp.S(0), sp.S(1)
+        for k in range(m + 1):
+            a1, b1 = values[(n + k*d, 0)]
+            coeff = sp.binomial(m, k) * rk
+            a, b, rk = a + coeff * a1, b + coeff * b1, rk * r
+        return a * mul, b * mul
 
     @classmethod
     def _solve(cls, f, x, y, err = None):
@@ -511,36 +768,31 @@ class _prove_approx_integral:
             return None
 
         _gammax = sp.factorial(x-1)
+        R = 3 # suggest R = 2 or R = 3
         if x % 2 == 1:
             values = {(0,0): (sp.S(0), 2**(x - 1) * abs(sp.bernoulli(x, sp.S(1)/4)) / x)}
-            base = 6
+            base = 2*R
         elif x % 2 == 0:
             values = {(1,0): (sp.S(0), 4**(-x) * (2**x - 2) * _gammax * (sp.zeta(x) / sp.pi**x))}
-            base = 7
+            base = 2*R + 1
 
         n = 1
         while True:
-            for r in range(base - 4, base + 1, 2):
+            for r in range(3 if base % 2 == 1 else 2, base + 1, 2):
                 a1, b1 = values[(r-2,0)]
                 a2, b2 = -a1 + _gammax*(r-1)**(-x), -b1
                 values[(r,0)] = (a2, b2)
 
             for m in (2*n, 2*n - 1):
-                a, b = sp.S(0), sp.S(0)
-                for k in range(m + 1):
-                    # expand (x^2-1)^m
-                    a1, b1 = values[(base-2*k, 0)]
-                    coeff = sp.binomial(m, k) * (-1)**(m-k)
-                    a, b = a + coeff * a1, b + coeff * b1
-                values[(base,m)] = (a, b)
+                values[(base,m)] = cls._binomial(values, base, m, d = -2, mul = (-1)**m)
 
             uv = cls._lin_comb(f, x, y, values, (base,2*n-1), (base,2*n))
             if uv is not None:
                 break
 
             n += 1
-            base += 6
-            # when x is odd, base = 6*n;  when x is even, base = 6*n + 1
+            base += 2*R
+            # when x is odd, base = 2R*n;  when x is even, base = 2R*n + 1
 
         u, v = uv
         if u <= 0 and v <= 0:
@@ -566,6 +818,57 @@ class _prove_approx_integral:
         This requires very high degree and is therefore impractical. DO NOT USE IT.
         """
         raise NotImplementedError
+
+    @classmethod
+    def asin(cls, f, x, y, err, fx, great):
+        """
+        Consider F(n,m) = Integral(t^(n)*(1-t^2)^m/sqrt(1-x^2t^2), (t,0,1))
+        It can be shown that F(n,m) = a * sqrt(1-x^2) + b * arcsin(a) when n is even.
+        Whilst F(n,m) = a * sqrt(1-x^2) + b when n is odd.
+
+        Actually we have recurrsion that
+        t^(n-1)*sqrt(1-x^2t^2)|_0^1 = (n-1)*F(n-2,0) - x^2*n*F(n,0).
+
+        b_{2n,m} = Sum_{j=0}^m * C(m,j) * (-1)^j * (2n+2j)!!/(2n+2j-1)!! / x^(2n+2j+1).
+
+        To ensure convergence, x needs to be small. The exact convergence radius is yet unknown.
+        However, since arcsin(x) = pi/2 - arcsin(sqrt(1-x^2)), 
+        we can assume x <= 1/sqrt(2) to compute arcsin(x).
+        """
+        values = {(0,0): (sp.S(0), 1/x), (1,0): (-1/x**2, 1/x**2), (0,1): (1/x**2/2, (2*x**2-1)/(2*x**3))}
+        n = 1
+        # K = sp.sqrt(1 - x**2)
+        while True:
+            for r in range(4*n - 3, 4*n + 3):
+                if values.get((r, 0)) is not None:
+                    continue
+                a1, b1 = values[(r-2, 0)]
+                a2, b2 = ((r-1) * a1 - 1) / r / x**2, ((r-1) * b1) / r / x**2
+                values[(r, 0)] = (a2, b2)
+
+            values[(2*n, n)] = cls._binomial(values, 2*n, n, d = 2)
+            values[(2*n, n-1)] = cls._binomial(values, 2*n, n-1, d = 2)
+            values[(2*n-1, n)] = cls._binomial(values, 2*n-1, n, d = 2)
+
+            (a1, b1), (a2, b2), (a3, b3) = values[(2*n,n-1)], values[(2*n-1,n)], values[(2*n,n)]
+            M = sp.Matrix([
+                [a1, 0, b1], [a2, b2, 0], [a3, 0, b3]
+            ]).T # three columns are coeffs of (sqrt(1-x^2), rational, arcsin(x))
+            if M.det() != 0:
+                u, v, w = M.solve(sp.Matrix([0, -y, 1]))
+                if (u>=0 and v>=0 and w>=0) or (u<=0 and v<=0 and w<=0):
+                    break
+
+            n += 1
+
+        if u <= 0 and v <= 0 and w <= 0:
+            u, v, w = -u, -v, -w
+        z = sp.symbols('x')
+        mz = sp.UnevaluatedExpr(1-z**2)
+        integrand = z**(2*n-1)*(1-z**2)**(n-1) * (u*z + v*mz + w*z*mz).together() / sp.sqrt(1 - (x*z)**2)
+        txt = '%s = \\int_0^1 %s \\text{d}x > 0'%(
+            lt(fx - y) if great == '>' else lt(y - fx), lt(integrand))
+        return txt
 
     @classmethod
     def atan(cls, f, x, y, err, fx, great):
@@ -596,12 +899,8 @@ class _prove_approx_integral:
                 a2, b2 = (-a1 + 1 / sp.S(2*r - 1)) / x**2, -b1 / x**2
                 values[(r,0)] = (a2, b2)
 
-            a, b = sp.S(0), sp.S(0)
-            for k in range(n + 1):
-                # expand (1-x^2)^m where m == n
-                a1, b1 = values[(n+k, 0)]
-                coeff = sp.binomial(n, k) * (-1)**(k)
-                a, b = a + coeff * a1, b + coeff * b1
+            # expand (1-x^2)^m where m == n
+            a, b = cls._binomial(values, n, n)
             values[(n,n)] = (a, b)
 
             a2, b2 = (-a + _half_beta(n+1,n)/2) / x**2, -b / x**2
