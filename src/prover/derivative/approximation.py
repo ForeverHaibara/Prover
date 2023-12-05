@@ -642,7 +642,9 @@ class _prove_approx_integral:
     ----------
     [1] https://zhuanlan.zhihu.com/p/669285539
 
-    [2] https://mathoverflow.net/questions/67384/
+    [2] https://zhuanlan.zhihu.com/p/670472865
+
+    [3] https://mathoverflow.net/questions/67384/
     """
     _is_equal_sgn = lambda u, v: (u >= 0 and v >= 0) or (u <= 0 and v <= 0)
 
@@ -831,7 +833,7 @@ class _prove_approx_integral:
 
         b_{2n,m} = Sum_{j=0}^m * C(m,j) * (-1)^j * (2n+2j)!!/(2n+2j-1)!! / x^(2n+2j+1).
 
-        To ensure convergence, x needs to be small. The exact convergence radius is yet unknown.
+        To ensure convergence, x needs to be small. The exact convergence radius is sqrt(2sqrt(2)-2).
         However, since arcsin(x) = pi/2 - arcsin(sqrt(1-x^2)), 
         we can assume x <= 1/sqrt(2) to compute arcsin(x).
         """
@@ -880,7 +882,7 @@ class _prove_approx_integral:
         We can actually compute that 
         F(n,n) = (-1)^n(x^2+1)^n / x^(4n+1) * arctan(x) + q
         And |-a/b - I| ~ (x/2)^(2n) / (1 + x^2/2) * sqrt(pi/2/n).
-        Hence the method converges only when |x| <= 2.
+        Hence the method converges only when |x| <= sqrt(2sqrt(2) + 2).
         """
         values = {(0,0): (sp.S(0), 1/x)} # F(0,0) = 0 + atan(x) / x
         n = 1
