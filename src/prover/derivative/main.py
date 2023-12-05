@@ -19,8 +19,8 @@ def _is_a_func_of_rational(x):
     """Check whether formula == f(p) where p is rational and f is a function."""
     if len(x.args) == 1 and isinstance(x.args[0], sp.Rational):
         from sympy.functions.elementary.exponential import log, exp
-        from sympy.functions.elementary.trigonometric import sin, cos, atan
-        if isinstance(x, (log, exp, sin, cos, atan)):
+        from sympy.functions.elementary.trigonometric import sin, cos, tan, asin, atan
+        if isinstance(x, (log, exp, sin, cos, tan, asin, atan)):
             return (x.func, x.args[0])
     elif len(x.args) == 0:
         return _is_constant(x)
