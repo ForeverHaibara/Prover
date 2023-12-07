@@ -2,18 +2,15 @@ from typing import Union
 
 import sympy as sp
 
-from .approximation import prove_approx
+from .approximation import prove_approx, Constants
 from ..proof import Proof
 
 
 def _is_constant(x, v = sp.S(1)):
     """If x == pi or e, return the function that generates it and v as a tuple."""
-    def exp_pi(z):
-        return sp.pi ** z
-    if x is sp.E:
-        return (sp.exp, v)
-    elif x is sp.pi:
-        return (exp_pi, v)
+    func = Constants.get(x)
+    if func is not None:
+        return (func, v)
 
 def _is_a_func_of_rational(x):
     """Check whether formula == f(p) where p is rational and f is a function."""
