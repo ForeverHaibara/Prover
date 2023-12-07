@@ -31,17 +31,46 @@ def racomp(x, y):
 def greatsgn(x, y):
     return '>' if x > y else ('=' if x == y else '<')
 
-def exp_pi(x):
-    return sp.pi ** x
 
+class Constants:
+    """
+    Wrap a sympy constant to a function.
+    """
+    def __new__(cls, *args, **kwargs):
+        return cls.get(*args, **kwargs)
+
+    @classmethod
+    def get(cls, x):
+        """See details at sympy.core.singleton."""
+        if x is sp.E:
+            return cls.exp
+        elif x is sp.pi:
+            return cls.exp_pi
+        elif x is sp.EulerGamma:
+            return cls.exp_EulerGamma
+        elif x is sp.Catalan:
+            return cls.exp_Catalan
+
+    @classmethod
+    def exp(cls, x):
+        return sp.exp(x)
+
+    @classmethod
+    def exp_pi(cls, x):
+        return sp.pi ** x
+
+    @classmethod
+    def exp_EulerGamma(cls, x):
+        return sp.EulerGamma ** x
+
+    @classmethod
+    def exp_Catalan(cls, x):
+        return sp.Catalan ** x
 
 
 class _prove_approx:
     """
     Prove f(x) >= y or f(x) <= y where x and y are both rational numbers.
-
-    FUTURE PLAN: If err is not None, prove that |f(x) - y| <= err. THIS IS 
-    CURRENTLY NOT IMPLEMENTED.
 
     Parameters
     -------
@@ -89,7 +118,7 @@ class _prove_approx:
         return txt
 
     @classmethod
-    def _trivial(cls, f, x, y, fx = None, err = None):
+    def _trivial(cls, f, x, y, fx = None):
         """
         Prove very trivial inequality, i.e. e^2 > -5.
         """
@@ -116,7 +145,7 @@ class _prove_approx:
                 great = greatsgn(fx, y)
                 return '\\%s %s %s %s'%('sin' if f == sp.sin else 'cos', lt(x,2), great, lt(y))
 
-        if f in (sp.sin, sp.tan, sp.asin, sp.atan):
+        if f in (sp.asin, sp.atan):
             if x > 0 and y <= 0:
                 return '\\operatorname{%s} %s > %s'%(f.__name__, lt(x), racomp(0, y))
             elif x < 0 and y >= 0:
@@ -135,7 +164,6 @@ class _prove_approx:
         f: Union[Callable, str],
         x: Union[int, float, sp.Rational],
         y: Union[int, float, sp.Rational],
-        err: Union[int, float, sp.Rational] = None,
         method: str = 'series',
     ):
         if isinstance(f, str):
@@ -148,7 +176,7 @@ class _prove_approx:
 
         _txt_wrapper = lambda txt: Proof('$$\\begin{aligned}& %s\\end{aligned}$$'%(txt))
 
-        txt = cls._trivial(f, x, y, err = err)
+        txt = cls._trivial(f, x, y)
         if txt is not None:
             return _txt_wrapper(txt)
 
@@ -160,7 +188,7 @@ class _prove_approx:
         if func is not None:
             fx = f(x)
             great = greatsgn(fx, y)
-            txt = func(f, x, y, err, great, method = method)
+            txt = func(f, x, y, great, method = method)
 
         if txt is None:
             return None
@@ -168,51 +196,56 @@ class _prove_approx:
 
 
     @classmethod
-    def exp(cls, f, x, y, err, great, method = 'series'):
+    def exp(cls, f, x, y, great, method = 'series'):
         method_func = cls._get_method_func(method)
         if method == 'series':
             if x >= 0 or y <= 0:
-                txt = method_func(f, x, y, err)
+                txt = method_func(f, x, y)
             else:
-                txt = method_func(f, -x, 1 / y, err)
+                txt = method_func(f, -x, 1 / y)
                 txt += '\\\\ & \\Rightarrow\ e^{%s} %s %s'%(lt(x), great, lt(y))
         elif method == 'integral':
-            txt = method_func(f, x, y, err)
+            txt = method_func(f, x, y)
         return txt
 
     @classmethod
-    def log(cls, f, x, y, err, great, method = 'series'):
+    def log(cls, f, x, y, great, method = 'series'):
         method_func = cls._get_method_func(method)
         if x <= 0:
             return None
         # ln(x) ~ y <=> x ~ e^y
         if y >= 0:
-            txt = method_func(sp.exp, y, x, err)
+            txt = method_func(sp.exp, y, x)
         else:
-            txt = method_func(sp.exp, -y, 1 / x, err)
+            txt = method_func(sp.exp, -y, 1 / x)
         txt += '\\\\ & \\Rightarrow\ \\ln%s %s %s'%(lt(x), great, lt(y))
         return txt
 
     @classmethod
-    def exp_pi(cls, f, x, y, err, great, method = 'series'):
+    def exp_pi(cls, f, x, y, great, method = 'series'):
         method_func = cls._get_method_func(method)
-        return method_func(f, x, y, err)
+        return method_func(f, x, y)
 
     @classmethod
-    def sin(cls, f, x, y, err, great, method = 'series'):
-        return cls._sin_or_cos_handler(f, x, y, err, great, method = method)
+    def exp_Catalan(cls, f, x, y, great, method = 'series'):
+        method_func = cls._get_method_func(method)
+        return method_func(f, x, y)
 
     @classmethod
-    def cos(cls, f, x, y, err, great, method = 'series'):
-        return cls._sin_or_cos_handler(f, x, y, err, great, method = method)
+    def sin(cls, f, x, y, great, method = 'series'):
+        return cls._sin_or_cos_handler(f, x, y, great, method = method)
 
     @classmethod
-    def _sin_or_cos_handler(cls, f, x, y, err, great, method = 'series'):
+    def cos(cls, f, x, y, great, method = 'series'):
+        return cls._sin_or_cos_handler(f, x, y, great, method = method)
+
+    @classmethod
+    def _sin_or_cos_handler(cls, f, x, y, great, method = 'series'):
         method_func = cls._get_method_func(method)
         if (0 <= x <= 2 * sp.pi) or (y <= -1 or y >= 1):
-            txt = method_func(f, x, y, err)
+            txt = method_func(f, x, y)
         elif -2 * sp.pi <= x < 0:
-            txt = method_func(f, -x, y if f == sp.cos else -y, err)
+            txt = method_func(f, -x, y if f == sp.cos else -y)
             if f == sp.sin:
                 txt += '\\\\ & \\Rightarrow\ \\sin{%s} %s %s'%(lt(x,2), great, lt(y))
             elif f == sp.cos:
@@ -251,7 +284,7 @@ class _prove_approx:
             )
             err3 = abs(k * 2 * err2)
             target = flip * (y + err3) if great == '>' else flip * (y - err3)
-            middle = _prove_approx_series(f, x - k*t2, target, err)
+            middle = _prove_approx_series(f, x - k*t2, target)
 
             lipschitz = cls._lipschitz(f, x-k*sp.pi, flip * y, x-k*t2, 1, target, err3, flip = flip)
             txt += '\\\\ & %s\\\\ & \\Rightarrow \\%s %s = %s'%(
@@ -260,19 +293,76 @@ class _prove_approx:
         return txt
 
     @classmethod
-    def tan(cls, f, x, y, err, great, method = 'series'):
+    def tan(cls, f, x, y, great, method = 'series'):
         method_func = cls._get_method_func(method)
-        if abs(x) <= sp.pi / 2:
-            return method_func(f, x, y, err)
+        if abs(x) <= 1 or (abs(x) <= sp.pi / 2 and sp.sign(x) != sp.sign(y)):
+            return method_func(f, x, y)
+        elif abs(x) <= sp.pi / 2:
+            # also sgn(x) == sgn(y) != 0
+            # use tan(x) = 2/(cot(x/2) - tan(x/2))
+            # solve 2z / (1-z^2) = y  =>  z = (sqrt(y^2+1) - 1) / y
+            z = (sp.sqrt(y**2 + 1) - 1) / abs(y)
+            # compare tan(x/2) and z
+            x1 = abs(x) / 2
+            mid = rational_between(f(x1), z)
+            txt = method_func(f, x1, mid)
+            txt += '\\\\ & \\Rightarrow\ \\tan\\left(%s\\right) = %s\\frac{2}'\
+                '{\\cot %s - \\tan %s} %s %s\\frac{2}{%s - %s} = %s'%(
+                    lt(x), '-' if x < 0 else '',
+                    lt(x1,1), lt(x1,1), great, '-' if x < 0 else '', 
+                    lt(1/mid), lt(mid), racomp(2*mid/(1-mid**2)*sp.sign(x), y)
+            )
+            return txt
+        else:
+            # tan(x) = tan(x - kpi)
+            k = round(x / sp.pi)
+            z = x - k * sp.pi
+            mid = rational_between(z, sp.atan(y))
+            # compare x-k*pi ~ mid ~ atan(y)
+            if sp.sign(z) != sp.sign(y):
+                prove_pi1 = method_func(Constants.exp_pi, sp.S(1), x / k)
+                prove_pi2 = method_func(Constants.exp_pi, sp.S(1), x / (sp.sign(z) / 2 + k))
+                if z < 0:
+                    txt = '-\\frac{\\pi}{2} < %s < 0'%lt(z)
+                else:
+                    txt = '0 < %s < \\frac{\\pi}{2}'%lt(z)
+                txt = '%s\\\\ & %s\\\\ & \\Rightarrow\ %s\ \\Rightarrow\ '\
+                        '\\tan\\left(%s\\right) = \\tan\\left(%s\\right) %s %s'%(
+                            prove_pi1, prove_pi2, txt, 
+                            lt(x), lt(z), great, lt(y)
+                )
+                return txt
+            
+            else:
+                # if sgn(z) == sgn(y)
+                prove_pi1 = method_func(Constants.exp_pi, sp.S(1), (x - mid) / k)
+                if mid > z:
+                    prove_pi2 = method_func(Constants.exp_pi, sp.S(1), x / (k - sp.S(1)/2))
+                    txt = '-\\frac{\\pi}{2} < %s < %s'%(lt(z), lt(mid))
+                else:
+                    prove_pi2 = method_func(Constants.exp_pi, sp.S(1), x / (k + sp.S(1)/2))
+                    txt = '%s < %s < \\frac{\\pi}{2}'%(lt(mid), lt(z))
+                final = method_func(sp.tan, abs(mid), abs(y))
+                if final is None:
+                    return None
+                txt = '%s\\\\ & %s\\\\ & %s\\\\ & \\Rightarrow\ %s\ \\Rightarrow\ '\
+                        '\\tan\\left(%s\\right) = \\tan\\left(%s\\right) %s'\
+                        '\\tan\\left(%s\\right) %s %s'%(
+                            prove_pi1, prove_pi2, final, txt,
+                            lt(x), lt(z), great,
+                            lt(mid), great, lt(y)
+                )
+                return txt
+
 
     @classmethod
-    def asin(cls, f, x, y, err, great, method = 'series'):
+    def asin(cls, f, x, y, great, method = 'series'):
         method_func = cls._get_method_func(method)
         if (method == 'series' and abs(x) < 1) or (method == 'integral' and abs(x**2) <= sp.S(1)/2):
-            txt = method_func(f, x, y, err)
+            txt = method_func(f, x, y)
             return txt
         elif abs(y) >= sp.pi / 2 or abs(x) == 1:
-            prove_pi = method_func(exp_pi, sp.S(1), abs(y) * 2, err)
+            prove_pi = method_func(Constants.exp_pi, sp.S(1), abs(y) * 2)
             if abs(x) == 1:
                 txt = '%s\\\\ & \\Rightarrow\ \\operatorname{asin}\\left(%s\\right) = %s\\frac{\\pi}{2} %s %s'%(
                     prove_pi, lt(x), '-' if x < 0 else '', great, lt(y)
@@ -292,9 +382,9 @@ class _prove_approx:
                 mid = rational_between(x_, sp.cos(y))
             mid2 = rational_between(sp.asin(mid), sp.pi / 2 - abs(y))
             # asin(mid) ~ mid2
-            txt = method_func(f, mid, mid2, err)
+            txt = method_func(f, mid, mid2)
             v = abs(y) + mid2
-            txt2 = method_func(exp_pi, sp.S(1), 2*v)
+            txt2 = method_func(Constants.exp_pi, sp.S(1), 2*v)
             txt = '%s\\\\ & %s\\\\ & \\Rightarrow\ \\operatorname{asin}\\left(%s\\right)'\
                 ' = %s\\frac{\\pi}{2} %s\\operatorname{asin}\\left(%s\\right)'\
                 '%s'\
@@ -309,14 +399,14 @@ class _prove_approx:
             return txt
 
     @classmethod
-    def atan(cls, f, x, y, err, great, method = 'series'):
+    def atan(cls, f, x, y, great, method = 'series'):
         method_func = cls._get_method_func(method)
         if abs(x) <= 1:
             # guarantee convergence
-            txt = method_func(f, x, y, err)
+            txt = method_func(f, x, y)
             return txt
         elif abs(y) >= sp.pi / 2:
-            prove_pi = method_func(exp_pi, sp.S(1), abs(y) * 2, err)
+            prove_pi = method_func(Constants.exp_pi, sp.S(1), abs(y) * 2)
             txt = '%s\\\\ & \\Rightarrow\ \\operatorname{atan}\\left(%s\\right) %s %s\\frac{\\pi}{2} %s %s'%(
                 prove_pi, lt(x), great, '-' if great == '>' else '', great, lt(y)
             )
@@ -326,9 +416,9 @@ class _prove_approx:
             # first we find a rational number between atan(1/x) and pi/2 - y
             # we assume sgn(x) == sgn(y)
             mid = rational_between(f(abs(1/x)), sp.pi / 2 - abs(y))
-            txt = method_func(f, abs(1/x), mid, err)
+            txt = method_func(f, abs(1/x), mid)
             v = abs(y) + mid
-            txt2 = method_func(exp_pi, sp.S(1), 2*v)
+            txt2 = method_func(Constants.exp_pi, sp.S(1), 2*v)
             txt = '%s\\\\ & %s\\\\ & \\Rightarrow\ \\operatorname{atan}\\left(%s\\right)'\
                 ' = %s\\frac{\\pi}{2} %s\\operatorname{atan}\\left(%s\\right)'\
                 '%s %s %s %s = %s'%(
@@ -355,7 +445,7 @@ class _prove_approx_series:
         return cls._solve(*args, **kwargs)
 
     @classmethod
-    def _solve(cls, f, x, y, err = None):
+    def _solve(cls, f, x, y):
         fx = f(x)
         great = greatsgn(fx, y)
 
@@ -365,10 +455,10 @@ class _prove_approx_series:
             return None
 
         if func is not None:
-            return func(f, x, y, err, fx, great)
+            return func(f, x, y, fx, great)
 
     @classmethod
-    def exp(cls, f, x, y, err, fx, great):
+    def exp(cls, f, x, y, fx, great):
         """Only supports x > 0."""
         t, c, n = sp.S(0), sp.S(1), 0
         if great == '>':
@@ -395,7 +485,7 @@ class _prove_approx_series:
         return txt
 
     @classmethod
-    def exp_pi(cls, f, x, y, err, fx, great):
+    def exp_pi(cls, f, x, y, fx, great):
         """
         Currently only supports positive integer x.
 
@@ -434,12 +524,12 @@ class _prove_approx_series:
 
         elif x % 2 == 1:
             y_sq = y**2
-            txt = cls.exp_pi(f, x*2, y_sq, err, fx, great)
-            txt += '\\\\ & \\Rightarrow\ %s %s \\sqrt{%s} %s %s'%(lt(exp_pi(x)), great, lt(y_sq), great, lt(y))
+            txt = cls.exp_pi(f, x*2, y_sq, fx, great)
+            txt += '\\\\ & \\Rightarrow\ %s %s \\sqrt{%s} = %s'%(lt(Constants.exp_pi(x)), great, lt(y_sq), lt(y))
             return txt
 
     @classmethod
-    def sin(cls, f, x, y, err, fx, great):
+    def sin(cls, f, x, y, fx, great):
         """Only supports x > 0."""
         if great == '>':
             criterion = lambda n, t, y: t >= y and (n // 2) % 2 == 1
@@ -453,7 +543,7 @@ class _prove_approx_series:
         return txt
 
     @classmethod
-    def cos(cls, f, x, y, err, fx, great):
+    def cos(cls, f, x, y, fx, great):
         """Only supports x > 0."""
         if great == '>':
             criterion = lambda n, t, y: t >= y and (n // 2) % 2 == 1
@@ -480,7 +570,7 @@ class _prove_approx_series:
         return t, c, n
 
     @classmethod
-    def tan(cls, f, x, y, err, fx, great):
+    def tan(cls, f, x, y, fx, great):
         """
         Only supports -pi/2 < x < pi/2. 
         This is because pi/2 is the first singularity of tan(x).
@@ -543,7 +633,7 @@ class _prove_approx_series:
         return txt
 
     @classmethod
-    def asin(cls, f, x, y, err, fx, great):
+    def asin(cls, f, x, y, fx, great):
         """Only supports -1 < x < 1."""
         if x < 0:
             x, y, sgn, great = -x, -y, -1, chr(122 - ord(great))
@@ -579,7 +669,7 @@ class _prove_approx_series:
         return txt
 
     @classmethod
-    def atan(cls, f, x, y, err, fx, great):
+    def atan(cls, f, x, y, fx, great):
         """
         We shall use the series given by Euler that:
         atan(x) = z / x * Sum_{k=0} (2k)!!/(2k+1)!! * z^k
@@ -678,7 +768,7 @@ class _prove_approx_integral:
         return a * mul, b * mul
 
     @classmethod
-    def _solve(cls, f, x, y, err = None):
+    def _solve(cls, f, x, y):
         fx = f(x)
         great = greatsgn(fx, y)
 
@@ -688,10 +778,10 @@ class _prove_approx_integral:
             return None
 
         if func is not None:
-            return func(f, x, y, err, fx, great)
+            return func(f, x, y, fx, great)
 
     @classmethod
-    def exp(cls, f, x, y, err, fx, great):
+    def exp(cls, f, x, y, fx, great):
         """
         Consider F(n,m) = Integral(t^n*(1-t)^m*exp(xt), (t,0,1))
         F(n,m) = m/x F(n,m-1) - n/x F(n-1,m) + (t^n*(1-t)^m*exp(xt)/x)|_0^1
@@ -741,7 +831,7 @@ class _prove_approx_integral:
 
 
     @classmethod
-    def exp_pi(cls, f, x, y, err, fx, great):
+    def exp_pi(cls, f, x, y, fx, great):
         """
         This is a special function defined here. f(x) = pi^x.
         It only supports x == positive integer.
@@ -806,7 +896,60 @@ class _prove_approx_integral:
         return txt
 
     @classmethod
-    def log(cls, f, x, y, err, fx, great):
+    def exp_Catalan(cls, f, x, y, fx, great):
+        """
+        This is a special function defined here. f(x) = Catalan^x.
+        Currently it only supports x == 1.
+
+        Consider F(n,m) = Integral((t-1)^m*log(t)/(t^n*(1+t^2)), (t,1,oo)).
+        F(n,0) = -F(n-2,0) + (n-1)^(-2)
+
+        Let w = 2m/n, then |-a/b - I| ~ C / sqrt(n) * (w/2)^w * (1-w)^(1-w)
+        The best choice is w = 2/3, with convergence rate ~ 3^(-n)/sqrt(n).
+
+        The initial value is given by F(0,0) = Catalan.
+
+        References
+        ----------
+        [1] https://mathworld.wolfram.com/CatalansConstant.html
+        """
+        if x != 1:
+            return None
+
+        R = 3 # suggest R = 2 or R = 3
+        values = {(0,0): (sp.S(0), sp.S(1))}
+
+        n = 1
+        base = 2*R
+        while True:
+            for r in range(3 if base % 2 == 1 else 2, base + 1, 2):
+                a1, b1 = values[(r-2,0)]
+                a2, b2 = -a1 + sp.S(r-1)**(-2), -b1
+                values[(r,0)] = (a2, b2)
+
+            for m in (2*n, 2*n - 1):
+                values[(base,m)] = cls._binomial(values, base, m, d = -2, mul = (-1)**m)
+
+            uv = cls._lin_comb(f, x, y, values, (base,2*n-1), (base,2*n))
+            if uv is not None:
+                break
+
+            n += 1
+            base += 2*R
+            # when x is odd, base = 2R*n;  when x is even, base = 2R*n + 1
+
+        u, v = uv
+        if u <= 0 and v <= 0:
+            u, v = -u, -v
+        z = sp.symbols('x')
+        integrand = (z**2-1)**(2*n-1) * (u + v*(z**2-1)).together() / z**base / (1 + z**2) * sp.log(z)
+        txt = '%s = \\int_1^{\\infty} %s \\text{d}x > 0'%(
+            lt(fx - y) if great == '>' else lt(y - fx), lt(integrand))
+        return txt
+
+
+    @classmethod
+    def log(cls, f, x, y, fx, great):
         """
         WLOG we assume x > 1 to compute log(x).
         Consider F(n,m) = Integral(t^n*(1-t)^m/(1+(x-1)t), (t,0,1))
@@ -822,7 +965,7 @@ class _prove_approx_integral:
         raise NotImplementedError
 
     @classmethod
-    def asin(cls, f, x, y, err, fx, great):
+    def asin(cls, f, x, y, fx, great):
         """
         Consider F(n,m) = Integral(t^(n)*(1-t^2)^m/sqrt(1-x^2t^2), (t,0,1))
         It can be shown that F(n,m) = a * sqrt(1-x^2) + b * arcsin(a) when n is even.
@@ -873,7 +1016,7 @@ class _prove_approx_integral:
         return txt
 
     @classmethod
-    def atan(cls, f, x, y, err, fx, great):
+    def atan(cls, f, x, y, fx, great):
         """
         Consider F(n,m) = Integral(t^(2n)*(1-t^2)^m/(1+(xt)^2), (t,0,1))
         F(n,m) = 1/x^2 * [-F(n-1, m) + Integral(t^(2n-2)*(1-t^2)^m, (t,0,1))]
