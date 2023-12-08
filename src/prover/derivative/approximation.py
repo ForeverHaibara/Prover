@@ -227,6 +227,11 @@ class _prove_approx:
         return method_func(f, x, y)
 
     @classmethod
+    def exp_EulerGamma(cls, f, x, y, great, method = 'series'):
+        method_func = cls._get_method_func(method)
+        return method_func(f, x, y)
+
+    @classmethod
     def exp_Catalan(cls, f, x, y, great, method = 'series'):
         method_func = cls._get_method_func(method)
         return method_func(f, x, y)
@@ -527,6 +532,87 @@ class _prove_approx_series:
             txt = cls.exp_pi(f, x*2, y_sq, fx, great)
             txt += '\\\\ & \\Rightarrow\ %s %s \\sqrt{%s} = %s'%(lt(Constants.exp_pi(x)), great, lt(y_sq), lt(y))
             return txt
+
+    @classmethod
+    def exp_EulerGamma(cls, f, x, y, fx, great):
+        """
+        Using Euler-Maclaurin formula, we have for even number n that
+        gamma = Sum_{k=1}^n (1/k) - ln(n) + Sum_{k=1}^n B_k / (kn^k) + r_n
+        where
+        r_n = 2 * n!/(2*pi*I)^n * Integral(x^{-n-1}Sum(k^(-n)*cos(2*pi*k*x), (k,1,oo)), (x,n,oo))
+        and |r_n| <= 2 * n!/(2*pi)^n * zeta(n) / n^(n+1) = |B_n| / n^(n+1) = R_n
+
+        The approximated convergence speed is given by
+        |R_n| ~ 2*sqrt(2*pi) / (2*pi*E)^n / sqrt(n).
+
+        It suffices to find sufficiently large N such that |S_N - y| >= R_N.
+        However, if we compute the approximant by n = 1,2,3,..... It will take O(N^2) time.
+        We shall determine n by bisection, which is at most O(NlogN) time.
+
+        First we yield an upper bound for R_N. When 2R_N < |gamma - y|. We must have
+        |S_N - y| <= |S_N - gamma| + |gamma - y| < 2R_N, which is a stop.
+
+        Also, R_N > 2 / (2*pi*E)^n / n.
+        """
+        if x != 1:
+            return None
+        def _compute_sr(n):
+            s = 0
+            nk = 1
+            for k in range(1, n + 1):
+                nk *= n
+                s += sp.Rational(1,k) + (sp.bernoulli(k) if k > 1 else -sp.S.Half) / (k * nk)
+                # Warning:
+                # Sympy changes bernoulli(1) from -1/2 to 1/2 since version 1.12.
+                # See details at https://github.com/sympy/sympy/pull/23926
+                # So do not trust the result of bernoulli(1)!
+            rem = abs(sp.bernoulli(n)) / n**(n+1)
+            return s, rem
+
+        def _satisfy_rough_bound(n):
+            rem = abs(sp.bernoulli(n)) / n**(n+1)
+            return bool(2 * rem <= abs(sp.EulerGamma - y))
+
+        def _satisfy_bound(n):
+            s, rem = _compute_sr(n)
+            return bool(abs(s - sp.log(n) - y) >= rem)
+
+        def f(n):
+            # keep n even
+            return n + 1 if n % 2 == 1 else n
+
+        N0 = round(-sp.log(abs(sp.EulerGamma - y) / 4) / (sp.log(2*sp.pi) + 1))
+        N0 = max(N0, sp.S(1))
+        while N0 > 1 and _satisfy_rough_bound(N0):
+            N0 = N0 // 2
+        N0 = N0 * 2
+        while not _satisfy_rough_bound(N0):
+            N0 = N0 * 2
+        # now that N0 must succeed, also N0/2 must fail
+        l, r = f(N0 // 2), f(N0)
+        while l + 2 < r:
+            m = (l + r) // 2
+            if _satisfy_bound(m):
+                r = m
+            else:
+                l = m
+        n = r
+        s, rem = _compute_sr(n)
+        comp = s - rem if great == '>' else s + rem
+        int_part = '\\int_{%d}^{\\infty}x^{-%d}\\sum_{k=1}^{\\infty}\\frac{\\cos(2\pi kx)}{k^{%d}}\\text{d}x'%(
+            n, n+1, n
+        )
+        prove_ln = _prove_approx_series(sp.exp, comp - y, n) + '\\\\ & ' if comp > y else '' # log(n) ~ comp - y
+        txt = '%s\\gamma = \\sum_{k=1}^{%d} \\frac{1}{k} - \\ln{%d} + \\sum_{k=1}^{%d} \\frac{B_k}{k\\cdot %d^k} '\
+                ' %s \\frac{2\\cdot %d!}{(2\\pi)^{%d}} %s'\
+                ' %s \\sum_{k=1}^{%d} \\frac{1}{k} - \\ln{%d} + \\sum_{k=1}^{%d} \\frac{B_k}{k\\cdot %d^k}'\
+                ' %s \\frac{2\\cdot %d! \\zeta(%d)}{(2\\pi)^{%d}\\cdot %d^{%d}} = %s - \\ln %s %s %s'%(
+                prove_ln, n, n, n, n,
+                '+' if n % 4 == 0 else '-', n, n, int_part,
+                great, n, n, n, n,
+                '-' if great == '>' else '+', n, n, n, n, n+1, lt(comp), n, great, lt(y)
+        )
+        return txt
 
     @classmethod
     def sin(cls, f, x, y, fx, great):
