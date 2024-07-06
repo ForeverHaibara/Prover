@@ -1,7 +1,7 @@
 from sympy.core import Basic
 from sympy.core.traversal import postorder_traversal
 
-from .tractable import Tractable
+from .traceable import Traceable
 
 def write_full_proof(obj: Basic):
     """
@@ -10,7 +10,7 @@ def write_full_proof(obj: Basic):
     written = set()
     proof = []
     for node in postorder_traversal(obj):
-        if isinstance(node, Tractable):
+        if isinstance(node, Traceable):
             _id = node # id(node)
             if _id in written:
                 continue

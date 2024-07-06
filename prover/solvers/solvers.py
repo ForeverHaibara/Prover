@@ -1,21 +1,15 @@
 import sympy as sp
 from sympy.core import Dummy, Expr, Equality, Tuple, sympify
 from sympy.logic.boolalg import Boolean
-from sympy.utilities.iterables import iterable
 
-from ..core.tractable import TractableSolveSet
-
-def _sympified_tuple(w):
-    if not iterable(w):
-        return Tuple(sympify(w))
-    return Tuple(*map(sympify, w))
-
+from ..core.traceable import TraceableSolveSet
+from ..utilities import sympified_tuple
 
 def _get_exprs_and_constraints(exprs):
     """
     Get the expressions and constraints from the given arguments.
     """
-    exprs = _sympified_tuple(exprs)
+    exprs = sympified_tuple(exprs)
     expr_list = list(filter(lambda x: isinstance(x, Expr) or isinstance(x, Equality), exprs))
     # constrain_list = list(filter(lambda x: not isinstance(x, Expr), exprs))
     constrain_list = list(filter(lambda x: isinstance(x, Boolean) and not isinstance(x, Equality), exprs))
@@ -25,15 +19,15 @@ def _get_exprs_and_constraints(exprs):
     return expr_list, constrain_list
 
 
-def solve(f, symbols, **flags) -> TractableSolveSet:
+def solve(f, symbols, **flags) -> TraceableSolveSet:
     """
-    Wrapper for sympy.solve, returning a TractableSolveSet object.
+    Wrapper for sympy.solve, returning a TraceableSolveSet object.
     """
     flags['dict'] = flags.get('dict', True)
     as_eq = flags.pop('as_eq', True)
     real = flags.pop('real', False)
 
-    (f, constraints), symbols = _get_exprs_and_constraints(f), _sympified_tuple(symbols)
+    (f, constraints), symbols = _get_exprs_and_constraints(f), sympified_tuple(symbols)
     if real:
         real_symbols = [Dummy(symb.name, real=True) for symb in symbols]
         f = [_.xreplace(dict(zip(symbols, real_symbols))) for _ in f]
@@ -47,7 +41,7 @@ def solve(f, symbols, **flags) -> TractableSolveSet:
     if result is None:
         return None
 
-    result = _sympified_tuple(result)
+    result = sympified_tuple(result)
     if len(constraints):
         filtered_result = []
         for res in result:
@@ -76,4 +70,4 @@ def solve(f, symbols, **flags) -> TractableSolveSet:
                 f[i] = Equality(f[i], 0)
 
     f = sympify(Tuple(*f, *constraints))
-    return TractableSolveSet(name, f, result)
+    return TraceableSolveSet(name, f, result)

@@ -17,11 +17,11 @@ from sympy.logic.boolalg import Boolean, BooleanFunction
 from sympy.printing import latex
 from sympy.utilities.iterables import iterable
 
-def stop_at_tractable(obj):
+def stop_at_traceable(obj):
     """
-    Return an object stopping at Tractable objects to shorten the expression.
+    Return an object stopping at Traceable objects to shorten the expression.
     """
-    return obj.replace(Tractable, lambda *x: x[0])
+    return obj.replace(Traceable, lambda *x: x[0])
 
 def _merge_suffixes(suffix):
     # 'S_2_{34} -> S_{2,34}'
@@ -32,9 +32,9 @@ def _merge_suffixes(suffix):
 
 
 
-class Tractable(Basic):
+class Traceable(Basic):
     """
-    Wrapper for sympy objects with tractable graph.
+    Wrapper for sympy objects with traceable graph.
 
     Parameters
     ==========
@@ -80,7 +80,7 @@ class Tractable(Basic):
         name, definition, value = self.name, self.definition, self.value
         s = ''
         if isinstance(definition, Expr) and isinstance(value, Expr):
-            if definition.has(Tractable):
+            if definition.has(Traceable):
                 if isinstance(name, (Symbol, UndefinedFunction)):
                     if definition == value:
                         s = '令 $%s = %s$.'%(ref(name), ref(definition))
@@ -101,7 +101,7 @@ class Tractable(Basic):
                             )
                         else:
                             s = '则\n\\begin{equation}%s = %s.\\end{equation}'%(name_str, def_str)
-            else: # not self.definition.has(Tractable)
+            else: # not self.definition.has(Traceable)
                 s = '定义 $%s = %s$.' % (mathref(name), mathref(definition))
                 
 
@@ -111,7 +111,7 @@ class Tractable(Basic):
             return '由 %s 得 %s = %s.' % (ref(self.definition), ref(self.name), ref(self.value))
 
             name, definition = self.name, self.definition
-            return '定义 $%s = %s$.' % (latex(name), latex(stop_at_tractable(definition)))
+            return '定义 $%s = %s$.' % (latex(name), latex(stop_at_traceable(definition)))
         
         return ''
 
@@ -126,16 +126,16 @@ class Tractable(Basic):
         name = self.name.name if hasattr(self.name, 'name') else self.name
         func = self.name.func if hasattr(self.name, 'func') else Symbol
         suffixed = func(_merge_suffixes(name + '_{%s}' % i))
-        cls = _promote_tractable_classes(self.value[i].__class__)
+        cls = _promote_traceable_classes(self.value[i].__class__)
         return cls(suffixed, Tuple(self, i), self.value[i], description='')
 
 
 
-class TractableApplication(Tractable, Application):
+class TraceableApplication(Traceable, Application):
     ...
 
 
-class TractableExpr(TractableApplication, Function):
+class TraceableExpr(TraceableApplication, Function):
     def diff(self, *args, **kwargs):
         evaluate = kwargs.get('evaluate', None)
         if evaluate is not None and (not evaluate):
@@ -146,10 +146,10 @@ class TractableExpr(TractableApplication, Function):
 
         # definition2 = self.definition
         # if hasattr(definition2, 'diff'):
-        #     if not definition2.has(Tractable):
+        #     if not definition2.has(Traceable):
         #         kwargs['evaluate'] = True if evaluate is None else evaluate
         #     definition2 = definition2.diff(*args, **kwargs)
-        #     if not definition2.has(Tractable):
+        #     if not definition2.has(Traceable):
         #         definition2 = definition2.factor()
         kwargs['evaluate'] = False
         definition2 = self.diff(*args, **kwargs)
@@ -158,21 +158,21 @@ class TractableExpr(TractableApplication, Function):
         if len(self.args) > 2 and hasattr(self.value, 'diff'):
             value2 = self.value
         
-        if not self.value.has(Tractable):
+        if not self.value.has(Traceable):
             kwargs['evaluate'] = True if evaluate is None else evaluate
         value2 = self.value.diff(*args, **kwargs)
-        if not value2.has(Tractable):
+        if not value2.has(Traceable):
             value2 = value2.factor()
-        return TractableExpr(name2, definition2, value2)
+        return TraceableExpr(name2, definition2, value2)
 
-        return TractableExpr(name2, definition2)
+        return TraceableExpr(name2, definition2)
 
 
-class TractableBoolean(TractableApplication, BooleanFunction):
+class TraceableBoolean(TraceableApplication, BooleanFunction):
     ...
 
 
-class TractableSet(Tractable):
+class TraceableSet(Traceable):
     @property
     def parent(self):
         return self.args[1]
@@ -184,7 +184,7 @@ class TractableSet(Tractable):
 
 
 
-class TractableSolveSet(TractableSet):
+class TraceableSolveSet(TraceableSet):
     def describe(self):
         def _value_parser():
             if iterable(self.value) and len(self.value) == 1:
@@ -206,14 +206,14 @@ class TractableSolveSet(TractableSet):
         return super().describe()
 
 
-def _promote_tractable_classes(cls):
-    if issubclass(cls, Tractable):
+def _promote_traceable_classes(cls):
+    if issubclass(cls, Traceable):
         return cls
     elif issubclass(cls, Expr):
-        return TractableExpr
+        return TraceableExpr
     elif issubclass(cls, (Boolean, BooleanFunction)):
-        return TractableBoolean
-    return Tractable
+        return TraceableBoolean
+    return Traceable
 
 
 def ref(obj, **kwargs):
@@ -226,15 +226,17 @@ def ref(obj, **kwargs):
 
     math = kwargs.pop('math', False)
     s = f'\\ref{{{id(obj)}}}'
+    if not isinstance(obj, Basic):
+        obj = sympify(obj)
     if math:
-        s = latex(stop_at_tractable(obj))
+        s = latex(stop_at_traceable(obj))
 
-    if obj.has(Tractable):
+    if obj.has(Traceable):
         if iterable(obj):
             0
 
-    if not isinstance(obj, Tractable):
-        s = latex(stop_at_tractable(obj))
+    if not isinstance(obj, Traceable):
+        s = latex(stop_at_traceable(obj))
     s = s.replace(':', '=')
     return s
 

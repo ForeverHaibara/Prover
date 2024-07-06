@@ -2,17 +2,17 @@ import sympy as sp
 from sympy.core import Equality, Expr, Tuple, sympify
 from sympy.sets import Contains, Reals
 
-from .solvers import _sympified_tuple, solve
+from .solvers import sympified_tuple, solve
 
-from ..core import TractableSet
-from ..core.tractable import mathref
+from ..core import TraceableSet
+from ..core.traceable import mathref
 
 def solve_extrema(f, symbols):
     """
     Solve the extrema of the given function by computing the derivative.
     """
     f = sympify(f)
-    symbols = _sympified_tuple(symbols)
+    symbols = sympified_tuple(symbols)
     if len(symbols) == 0:
         raise ValueError('No symbols are given.')
     if not isinstance(f, Expr):
@@ -44,6 +44,6 @@ def solve_extrema(f, symbols):
     )
     description = description.rstrip('\n')
 
-    extrema = TractableSet('f_minmax', Tuple(f), Tuple(fmin, fmax), description=description)
+    extrema = TraceableSet('f_minmax', Tuple(f), Tuple(fmin, fmax), description=description)
 
     return critic, extrema
