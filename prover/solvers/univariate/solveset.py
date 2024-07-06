@@ -24,7 +24,7 @@ def solveset(f, symbols):
         return func[f.func](*u)
     return sp.solveset(f, symbols, domain)
 
-def wrap_relational(rel, gen, return_type = 'callable'):
+def wrap_relational(rel, gen, return_type = 'set'):
     """
     Convert given relational objects to a specified type.
     """
