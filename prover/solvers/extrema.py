@@ -10,6 +10,8 @@ from ..core.traceable import mathref
 def solve_extrema(f, symbols):
     """
     Solve the extrema of the given function by computing the derivative.
+
+    Sometimes there are low-level routinues that 
     """
     f = sympify(f)
     symbols = sympified_tuple(symbols)

@@ -40,7 +40,7 @@ def wrap_relational(rel, gen, return_type = 'set'):
             return S.Complexes
 
     if not isinstance(rel, Set):
-        rel = sympified_tuple(rel)
+        rel = sympified_tuple(rel).doit()
         rel = solveset(And(*rel), gen)
 
     if return_type == 'set':

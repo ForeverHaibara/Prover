@@ -1,9 +1,9 @@
-from sympy.core import Dummy, Tuple
+from sympy.core import Dummy, Tuple, sympify
 
 from .traceable import Traceable, TraceableExpr, mathref
 
 
-def change_of_var(f, subs, name=None, result=None, simplify=None):
+def change_of_var(f, subs, name=None, result=None, simplify=(lambda x: x.doit())):
     if result is not None:
         value2 = result
     else:
@@ -33,7 +33,9 @@ def change_of_var(f, subs, name=None, result=None, simplify=None):
 def make_traceable(func):
     def wrapper(*args, **kwargs):
         traceable = kwargs.pop('traceable', False)
-        result = func(*args, **kwargs)
+        # new_args = [arg.doit() if hasattr(arg, 'doit') else arg for arg in args]
+        new_args = sympify(args).doit()
+        result = func(*new_args, **kwargs)
         if (traceable is False) or isinstance(result, Traceable):
             return result
         if traceable is True:

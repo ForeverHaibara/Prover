@@ -47,11 +47,16 @@ class Traceable(Basic):
     _description: str = None
     def __new__(cls, *args, **kwargs):
         description = kwargs.pop('description', None)
+        args = sympify(args)
+        if len(args) == 2 and isinstance(args[1], Expr) and cls is Traceable:
+            cls = TraceableExpr
+        elif len(args) == 3 and isinstance(args[2], Expr) and cls is Traceable:
+            cls = TraceableExpr
         obj = super().__new__(cls, *args, **kwargs)
         obj._description = description
         for funcname in ('__len__', '__iter__'):
             if hasattr(obj.value, funcname):
-                setattr(obj, funcname, getattr(obj.definition, funcname))
+                setattr(obj, funcname, getattr(obj.value, funcname))
 
         return obj
 
@@ -108,7 +113,7 @@ class Traceable(Basic):
             return s
 
         else:
-            return '由 %s 得 %s = %s.' % (ref(self.definition), ref(self.name), ref(self.value))
+            return '由 $%s$ 得 $%s = %s$.' % (mathref(self.definition), mathref(self.name), mathref(self.value))
 
             name, definition = self.name, self.definition
             return '定义 $%s = %s$.' % (latex(name), latex(stop_at_traceable(definition)))
@@ -220,7 +225,7 @@ def ref(obj, **kwargs):
     delimiter = kwargs.pop('delimiter', '')
     if delimiter is not None and delimiter != '':
         s = ref(obj, **kwargs)
-        if not s.startswith('\\ref'):
+        if not s.startswith('\\ref') and not s.startswith('\\eqref'):
             s = '%s%s%s'%(delimiter, s, delimiter)
         return s
 
@@ -228,15 +233,19 @@ def ref(obj, **kwargs):
     s = f'\\ref{{{id(obj)}}}'
     if not isinstance(obj, Basic):
         obj = sympify(obj)
+
     if math:
         s = latex(stop_at_traceable(obj))
 
-    if obj.has(Traceable):
-        if iterable(obj):
-            0
+    else:
+        if isinstance(obj, TraceableExpr):
+            s = f'\\eqref{{{id(obj)}}}'
+        elif obj.has(Traceable):
+            if iterable(obj):
+                0
 
-    if not isinstance(obj, Traceable):
-        s = latex(stop_at_traceable(obj))
+        if not isinstance(obj, Traceable):
+            s = latex(stop_at_traceable(obj))
     s = s.replace(':', '=')
     return s
 

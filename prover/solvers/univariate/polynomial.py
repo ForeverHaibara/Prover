@@ -1,13 +1,14 @@
 import sympy as sp
-from sympy.core import S, Basic
-from sympy.polys import Poly, ZZ, QQ
+from sympy.core import S, Basic, Mul, Pow, Rational
+from sympy.calculus.util import continuous_domain
+from sympy.polys import Poly, ZZ, QQ, PolynomialError
 from sympy.polys.numberfields import minimal_polynomial
 from sympy.polys.rootoftools import ComplexRootOf
 from sympy.simplify import fraction
 from sympy.sets import Complement, FiniteSet
+from sympy.solvers.solvers import unrad
 
 from .solveset import wrap_relational
-from .monotonicity import _range_from_critical_points
 from ...core import make_traceable
 
 def _closet(target, candidates, prec=20):
@@ -58,7 +59,10 @@ def rational_eval(f, x, dir='+-'):
             return f
         gen = f.free_symbols.pop()
         p, q = fraction(f.together())
-        p, q = Poly(p, gen), Poly(q, gen)
+        try:
+            p, q = Poly(p, gen), Poly(q, gen)
+        except PolynomialError:
+            return
 
         if (x is S.Infinity) or (x is S.NegativeInfinity):
             if p.degree() > q.degree():
@@ -74,12 +78,13 @@ def rational_eval(f, x, dir='+-'):
             sgn_px = sp.sign(px)
             if dir == '+-' or sgn_px == 0:
                 return S.ComplexInfinity
-            for _ in range(q.degree()):
+            for diff_deg in range(1, q.degree() + 1):
+                # consider Taylor expansion of q(x)
                 q = q.diff()
                 qx = q(x)
                 sgn_qx = sp.sign(qx)
                 if sgn_qx != 0:
-                    if dir == '-':
+                    if dir == '-' and diff_deg % 2 == 1:
                         sgn_qx = -sgn_qx
                     return sgn_px * sgn_qx * S.Infinity
             return
@@ -93,20 +98,25 @@ def rational_eval(f, x, dir='+-'):
     return v
 
 @make_traceable
-def poly_roots(f, domain=None):
+def poly_roots(f, domain=None, multiplicity=False):
     verify = wrap_relational(domain, f.gen, return_type='callable')
     if f.domain in [ZZ, QQ]:
         roots = f.all_roots(radicals = False)
     else:
         roots = list(sp.roots(f, cubics=True, quartics=True).keys())
-        
-    roots = list(filter(verify, roots))
+
+    if multiplicity:
+        roots = list(filter(verify, roots))
+    else:
+        roots = list(filter(verify, set(roots)))
     return roots
 
-@make_traceable
-def poly_extrema(f, domain=None):
+def _poly_extrema(f, domain=None):
     if (not isinstance(f, Poly)) and (f.free_symbols) == 1:
-        f = Poly(f, f.free_symbols.pop())
+        try:
+            f = Poly(f, f.free_symbols.pop())
+        except PolynomialError:
+            return
     if isinstance(f, Poly) and len(f.gens) > 1:
         return
 
@@ -117,16 +127,12 @@ def poly_extrema(f, domain=None):
 
     roots = poly_roots(fdiff, domain)
     fdiv = f.div(fdiff)[1]
-    criticals = [(root, rational_eval(fdiv, root)) for root in roots]
+    criticals = [(_rootof_to_radicals(root), rational_eval(fdiv, root)) for root in roots]
+    return criticals
 
-    flim = lambda x, dir: rational_eval(f, x, dir=dir)
-
-    return _range_from_critical_points(flim, criticals, domain)
-
-@make_traceable
-def rational_extrema(f, domain=None):
+def _rational_extrema(f, domain=None):
     if isinstance(f, Poly):
-        return poly_extrema(f, domain=domain)
+        return _poly_extrema(f, domain=domain)
 
     f = sp.cancel(f)
     if len(f.free_symbols) > 1:
@@ -136,20 +142,77 @@ def rational_extrema(f, domain=None):
     gen = f.free_symbols.pop()
     f = f.together()
     p, q = fraction(f)
-    p, q = Poly(p, gen), Poly(q, gen)
+    try:
+        p, q = Poly(p, gen), Poly(q, gen)
+    except PolynomialError:
+        return
 
     if q.degree() == 0:
-        return poly_extrema(Poly(p/q.LC(), gen), domain=domain)
+        return _poly_extrema(Poly(p/q.LC(), gen), domain=domain)
     fdiff = p.diff() * q - p * q.diff()
-    
-    domain = wrap_relational(domain, gen, return_type='set')
-    domain = domain.intersect(S.Reals)
-    domain = Complement(domain, FiniteSet(*poly_roots(q)))
+
+    if domain is None:
+        domain = continuous_domain(f, gen, S.Reals)
+        # domain = wrap_relational(domain, gen, return_type='set')
+        # domain = domain.intersect(S.Reals)
+        # domain = Complement(domain, FiniteSet(*poly_roots(q)))
 
     roots = poly_roots(fdiff, domain)
     fdiv = (p.div(fdiff)[1].as_expr() / q.div(fdiff)[1].as_expr())
-    criticals = [(root, rational_eval(fdiv, root)) for root in roots]
+    criticals = [(_rootof_to_radicals(root), rational_eval(fdiv, root)) for root in roots]
+    return criticals
 
-    flim = lambda x, dir: rational_eval(f, x, dir=dir)
 
-    return _range_from_critical_points(flim, criticals, domain)
+def _algebraic_extrema(f, domain=None):
+    """
+    TODO:
+    1. Check criticals lie in the domain after removing radicals.
+    2. Handle criticals correctly, e.g. (x + 2)/sqrt(x + 4) does not have x = -2 as criticals.
+        But (x + 2)**2/(x + 4) does.
+    3. Better substitution than applying f0.subs directly.
+    """
+    f0 = f
+
+    f_exp = 1
+    # Check whether f is a multiplication of radicals,
+    # if yes, power it to a rational func
+    if isinstance(f, Pow) and f.exp.is_constant():
+        f_exp = f.exp
+        f = f.base
+    elif isinstance(f, Mul):
+        f_exp_p, f_exp_q = S.One, S.One
+        for arg in f.args:
+            if isinstance(arg, Pow) and isinstance(arg.exp, Rational):
+                f_exp_q = sp.lcm(f_exp_q, arg.exp.q)
+        f = f ** f_exp_q
+        f_exp = S.One / f_exp_q
+
+    criticals = _rational_extrema(f, domain=domain)
+    if criticals is not None:
+        if f_exp != 1:
+            criticals = [(r, Pow(v, f_exp).radsimp()) for r, v in criticals]
+        return criticals
+
+    f = f0
+    
+
+    if len(f.free_symbols) > 1:
+        return
+    elif len(f.free_symbols) == 0:
+        return f
+    gen = f.free_symbols.pop()
+
+    fdiff = f.diff()
+    try:
+        expand_rad, cov = unrad(fdiff)
+        expand_rad = Poly(expand_rad, gen)
+    except Exception as e: # NotImplementedError
+        return
+
+    if domain is None:
+        domain = continuous_domain(f, gen, S.Reals)
+        
+    roots = poly_roots(expand_rad, domain)
+    roots = [_rootof_to_radicals(root) for root in roots]
+    criticals = [(root, f0.subs(gen, root).expand().radsimp()) for root in roots]
+    return criticals

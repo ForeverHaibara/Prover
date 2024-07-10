@@ -1,8 +1,14 @@
+import sympy as sp
+
 from sympy.calculus.util import continuous_domain
 from sympy.core import S
 from sympy.sets.sets import Interval, FiniteSet, Union
 
 from .solveset import wrap_relational
+from .polynomial import _algebraic_extrema, rational_eval
+
+from. ..core import Traceable, ref
+from ...utilities import sympified_tuple
 
 def _range_from_all_points(points, skip_sort=False):
     """
@@ -87,13 +93,14 @@ def _range_from_critical_points(flim, critical_points, domain=S.Reals):
         elif isinstance(interval, Interval):
             extracted, candidates = _extract_candidates(candidates, interval)
 
+            is_open = [interval.left_open] + [False] * len(extracted) + [interval.right_open]
             extracted = [(interval.left, flim(interval.left, dir='+'))] + extracted \
                             + [(interval.right, flim(interval.right, dir='-'))]
-            is_open = [interval.left_open] + [False] * len(extracted) + [interval.right_open]
             for i in range(len(extracted) - 1):
                 y1, y2, op1, op2 = extracted[i][1], extracted[i+1][1], is_open[i], is_open[i+1]
                 if y1 > y2:
                     y1, y2, op1, op2 = y2, y1, op2, op1
+                # print(interval, (y1, y2, op1, op2))
 
                 frange.append(Interval(y1, y2, left_open=op1, right_open=op2))
 
@@ -101,3 +108,78 @@ def _range_from_critical_points(flim, critical_points, domain=S.Reals):
             raise TypeError("Unsupported domain %s."%interval)
 
     return Union(*frange)
+
+
+def _get_f_symbols_and_domain(f, symbols=None, domain=None):
+    f = f.doit()
+    if symbols is None:
+        symbols = f.free_symbols
+        if len(symbols) == 0:
+            return f, symbols, domain
+
+    symbols = sympified_tuple(symbols)
+    if len(symbols) != 1:
+        raise ValueError('The function must be univariate, but %d symbols are given.'%len(symbols))
+    symbols = symbols[0]
+
+    if domain is None:
+        domain = continuous_domain(f, symbols, S.Reals)
+    else:
+        domain = wrap_relational(domain, symbols, return_type='set')
+
+    return f, symbols, domain
+
+
+def solve_extrema_univariate(f, symbols=None, domain=None):
+    """
+    Solve the extrema of a univariate function.
+    """
+    f0, domain0 = f, domain
+    f, symbols, domain = _get_f_symbols_and_domain(f, symbols, domain)
+
+    criticals = _algebraic_extrema(f, domain=domain)
+
+    criticals = tuple(criticals)
+    if len(criticals) > 1:
+        description = '解得 %s 在 %s 的极值点与极值有\n\\begin{equation}%s\\end{equation}'%(
+            ref(f0, delimiter='$'), ref(domain, delimiter='$'), ref(criticals, math=True)
+        )
+    elif len(criticals) == 1:
+        description = '解得 %s 在 %s 的唯一极值点与极值为\n\\begin{equation}%s\\end{equation}'%(
+            ref(f0, delimiter='$'), ref(domain, delimiter='$'), ref(criticals[0], math=True)
+        )
+    else:
+        description = '解得 %s 在 %s 上没有极值点.'%(
+            ref(f0, delimiter='$'), ref(domain, delimiter='$')
+        )
+
+    criticals_traced = Traceable(sp.Symbol('f_criticals'), f0, criticals, description=description)
+    return criticals_traced
+
+
+def solve_range_univariate(f, symbols=None, domain=None):
+    f0, domain0 = f, domain
+    f, symbols, domain = _get_f_symbols_and_domain(f, symbols, domain)
+
+    criticals_traced = solve_extrema_univariate(f0, symbols=symbols, domain=domain)
+
+    def f_lim(x, dir='+-'):
+        v = None
+        try:
+            v = rational_eval(f, x, dir=dir)
+        except:
+            pass
+        if v is None:
+            v = sp.limit(f, symbols, x, dir=dir)
+        return v
+
+    f_range = _range_from_critical_points(f_lim, criticals_traced.value, domain=domain)
+    f_range_traced = Traceable(
+        sp.Symbol('f_range'),
+        criticals_traced,
+        f_range,
+        description='因此 %s 在 %s 的值域为 $%s$.'%(
+            ref(f0, delimiter='$'), ref(domain, delimiter='$'), ref(f_range, math=True)
+        )
+    )
+    return f_range_traced
